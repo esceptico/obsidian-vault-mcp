@@ -3,26 +3,49 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.testclient import TestClient
+
 from obsidian_mcp.config import ServerSettings
-from obsidian_mcp.server import StaticTokenVerifier, create_mcp
+from obsidian_mcp.server import BearerAuthMiddleware, build_asgi_app, create_mcp
 
 
-class StaticTokenVerifierTests(unittest.IsolatedAsyncioTestCase):
-    async def test_correct_token_returns_access_token(self) -> None:
-        verifier = StaticTokenVerifier("s3cret")
-        token = await verifier.verify_token("s3cret")
-        assert token is not None
-        self.assertEqual(token.scopes, ["vault"])
+def _make_inner_app() -> Starlette:
+    async def ok(_request):
+        return JSONResponse({"ok": True})
 
-    async def test_wrong_token_returns_none(self) -> None:
-        verifier = StaticTokenVerifier("s3cret")
-        self.assertIsNone(await verifier.verify_token("nope"))
+    return Starlette(routes=[Route("/mcp", ok, methods=["POST", "GET"])])
 
-    async def test_compare_uses_constant_time_compare(self) -> None:
-        import hmac
-        with patch("obsidian_mcp.server.hmac.compare_digest", wraps=hmac.compare_digest) as spy:
-            await StaticTokenVerifier("a").verify_token("b")
-            spy.assert_called_once()
+
+class BearerAuthMiddlewareTests(unittest.TestCase):
+    TOKEN = "s3cret-token"
+
+    def setUp(self) -> None:
+        self.client = TestClient(BearerAuthMiddleware(_make_inner_app(), self.TOKEN))
+
+    def test_correct_token_passes_through(self) -> None:
+        response = self.client.post("/mcp", headers={"Authorization": f"Bearer {self.TOKEN}"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+
+    def test_missing_authorization_returns_401(self) -> None:
+        response = self.client.post("/mcp")
+        self.assertEqual(response.status_code, 401)
+
+    def test_wrong_token_returns_401(self) -> None:
+        response = self.client.post("/mcp", headers={"Authorization": "Bearer wrong"})
+        self.assertEqual(response.status_code, 401)
+
+    def test_401_advertises_bearer_realm_only(self) -> None:
+        """Critical: WWW-Authenticate must NOT include `resource_metadata=`,
+        otherwise spec-compliant MCP clients will attempt OAuth discovery
+        instead of just sending the static token we want them to use."""
+        response = self.client.post("/mcp")
+        www_auth = response.headers.get("www-authenticate", "")
+        self.assertIn("Bearer", www_auth)
+        self.assertNotIn("resource_metadata", www_auth)
 
 
 class AuthPostureTests(unittest.TestCase):
@@ -41,7 +64,6 @@ class AuthPostureTests(unittest.TestCase):
         self.assertIn("AUTH", str(ctx.exception).upper())
 
     def test_loopback_without_token_starts(self) -> None:
-        # Should not raise.
         create_mcp(self._settings(OBSIDIAN_MCP_HOST="127.0.0.1"))
 
     def test_auth_token_without_public_url_warns(self) -> None:
@@ -53,6 +75,31 @@ class AuthPostureTests(unittest.TestCase):
                 )
             )
         self.assertTrue(any("OBSIDIAN_MCP_PUBLIC_URL" in line for line in captured.output))
+
+
+class BuildAsgiAppTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _settings(self, **overrides) -> ServerSettings:
+        env = {"OBSIDIAN_MCP_VAULT_ROOT": self._tmp.name, **overrides}
+        with patch.dict(os.environ, env, clear=True):
+            return ServerSettings()
+
+    def test_no_oauth_metadata_endpoint_exists(self) -> None:
+        """If FastMCP's AuthSettings is reintroduced, the OAuth-style
+        protected-resource metadata endpoint comes back online and clients
+        like MCP Inspector enter an OAuth discovery loop. Authenticated GET
+        must 404 — proving the route doesn't exist."""
+        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        app = build_asgi_app(settings, create_mcp(settings))
+        client = TestClient(app)
+        response = client.get(
+            "/.well-known/oauth-protected-resource",
+            headers={"Authorization": "Bearer t"},
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

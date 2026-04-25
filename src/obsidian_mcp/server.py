@@ -1,10 +1,9 @@
 import hmac
 from typing import Any
 
-from mcp.server.auth.provider import AccessToken, TokenVerifier
-from mcp.server.auth.settings import AuthSettings
+import uvicorn
 from mcp.server.fastmcp import FastMCP
-from pydantic import AnyHttpUrl
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from obsidian_mcp.config import ServerSettings, load_settings
 from obsidian_mcp.constants import DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS
@@ -19,24 +18,61 @@ _AUTH_DISABLED_NON_LOOPBACK = (
     "Set the token, or bind to 127.0.0.1."
 )
 _PUBLIC_URL_MISSING_WARNING = (
-    "auth_token is set but OBSIDIAN_MCP_PUBLIC_URL is not; OAuth metadata will advertise %s. "
-    "Reverse-proxied deployments must set OBSIDIAN_MCP_PUBLIC_URL."
+    "auth_token is set but OBSIDIAN_MCP_PUBLIC_URL is not; clients reaching the server through "
+    "a different URL than %s may behave unexpectedly. Set OBSIDIAN_MCP_PUBLIC_URL when proxied."
 )
 _AUTH_DISABLED_LOOPBACK_WARNING = (
     "auth_token not set; tools are exposed without authentication on %s"
 )
-_CLIENT_ID = "obsidian-mcp-client"
-_TRANSPORT = "streamable-http"
+_TRANSPORT_PATH = "/mcp"
+_REALM = "obsidian-mcp"
+_UNAUTHORIZED_BODY = b'{"error":"unauthorized"}'
 
 
-class StaticTokenVerifier(TokenVerifier):
-    def __init__(self, token: str):
-        self.token = token
+class BearerAuthMiddleware:
+    """Static bearer-token guard for the MCP HTTP endpoint.
 
-    async def verify_token(self, token: str) -> AccessToken | None:
-        if not hmac.compare_digest(token, self.token):
-            return None
-        return AccessToken(token=token, client_id=_CLIENT_ID, scopes=["vault"])
+    Plain `Authorization: Bearer <token>` check, returning 401 with a
+    `WWW-Authenticate: Bearer realm="..."` header. Deliberately does NOT
+    advertise OAuth resource metadata, so spec-compliant MCP clients send
+    the pre-shared token directly instead of attempting an OAuth discovery
+    flow against an authorization server we don't run.
+    """
+
+    def __init__(self, app: ASGIApp, token: str) -> None:
+        self._app = app
+        self._expected = f"Bearer {token}"
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        provided = _bearer_header(scope)
+        if not hmac.compare_digest(provided, self._expected):
+            await _send_unauthorized(send)
+            return
+        await self._app(scope, receive, send)
+
+
+def _bearer_header(scope: Scope) -> str:
+    for name, value in scope.get("headers") or ():
+        if name == b"authorization":
+            return value.decode("latin-1")
+    return ""
+
+
+async def _send_unauthorized(send: Send) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"www-authenticate", f'Bearer realm="{_REALM}"'.encode("latin-1")),
+            ],
+        }
+    )
+    await send({"type": "http.response.body", "body": _UNAUTHORIZED_BODY})
 
 
 class Runtime:
@@ -48,8 +84,6 @@ class Runtime:
 def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
     settings = settings or load_settings()
     _validate_auth_posture(settings)
-
-    auth, verifier = _build_auth(settings)
     mcp = FastMCP(
         "Obsidian Vault MCP",
         instructions="Headless tools for an Obsidian-flavored Markdown vault.",
@@ -57,12 +91,19 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
         port=settings.port,
         stateless_http=True,
         json_response=True,
-        auth=auth,
-        token_verifier=verifier,
     )
     runtime = Runtime(settings)
     _register_tools(mcp, runtime)
     return mcp
+
+
+def build_asgi_app(settings: ServerSettings, mcp: FastMCP) -> ASGIApp:
+    """Compose the ASGI app served by uvicorn: FastMCP's StreamableHTTP app
+    optionally wrapped with the static-bearer guard."""
+    app: ASGIApp = mcp.streamable_http_app()
+    if settings.auth_token:
+        app = BearerAuthMiddleware(app, settings.auth_token)
+    return app
 
 
 def _validate_auth_posture(settings: ServerSettings) -> None:
@@ -73,17 +114,6 @@ def _validate_auth_posture(settings: ServerSettings) -> None:
         log.warning(_PUBLIC_URL_MISSING_WARNING, settings.resolved_public_url)
     if not settings.auth_token:
         log.warning(_AUTH_DISABLED_LOOPBACK_WARNING, settings.host)
-
-
-def _build_auth(settings: ServerSettings) -> tuple[AuthSettings | None, TokenVerifier | None]:
-    if not settings.auth_token:
-        return None, None
-    auth = AuthSettings(
-        issuer_url=AnyHttpUrl(settings.resolved_public_url),
-        resource_server_url=AnyHttpUrl(settings.resolved_public_url),
-        required_scopes=["vault"],
-    )
-    return auth, StaticTokenVerifier(settings.auth_token)
 
 
 def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
@@ -161,7 +191,10 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
 
 
 def main() -> None:
-    create_mcp().run(transport=_TRANSPORT)
+    settings = load_settings()
+    mcp = create_mcp(settings)
+    app = build_asgi_app(settings, mcp)
+    uvicorn.run(app, host=settings.host, port=settings.port)
 
 
 if __name__ == "__main__":

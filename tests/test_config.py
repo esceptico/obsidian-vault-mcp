@@ -13,7 +13,7 @@ class ConfigTests(unittest.TestCase):
             env = {
                 "OBSIDIAN_MCP_VAULT_ROOT": tmp,
                 "OBSIDIAN_MCP_AUTH_TOKEN": "secret",
-                "OPENAI_API_KEY": "openai-key",
+                "OBSIDIAN_MCP_OPENAI_API_KEY": "openai-key",
                 "OBSIDIAN_MCP_EMBEDDING_MODEL": "text-embedding-3-large",
                 "OBSIDIAN_MCP_EMBEDDING_DIMENSIONS": "256",
             }

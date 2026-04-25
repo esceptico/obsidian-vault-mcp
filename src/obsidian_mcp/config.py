@@ -28,27 +28,24 @@ class EmbeddingSettings:
 
 
 class ServerSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_prefix="OBSIDIAN_MCP_")
 
-    vault_root: Path = Field(validation_alias="OBSIDIAN_MCP_VAULT_ROOT")
-    trash_path: str = Field(default=".trash", validation_alias="OBSIDIAN_MCP_TRASH_PATH")
-    default_note_folder: str = Field(default="Inbox", validation_alias="OBSIDIAN_MCP_DEFAULT_NOTE_FOLDER")
-    daily_notes_path: str = Field(default="Daily", validation_alias="OBSIDIAN_MCP_DAILY_NOTES_PATH")
-    attachments_path: str = Field(default="Assets", validation_alias="OBSIDIAN_MCP_ATTACHMENTS_PATH")
-    templates_path: str = Field(default="Templates", validation_alias="OBSIDIAN_MCP_TEMPLATES_PATH")
+    vault_root: Path = Field()
+    trash_path: str = Field(default=".trash")
+    default_note_folder: str = Field(default="Inbox")
+    daily_notes_path: str = Field(default="Daily")
+    attachments_path: str = Field(default="Assets")
+    templates_path: str = Field(default="Templates")
 
-    host: str = Field(default="127.0.0.1", validation_alias=AliasChoices("OBSIDIAN_MCP_HOST", "FASTMCP_HOST"))
-    port: int = Field(default=8000, validation_alias=AliasChoices("OBSIDIAN_MCP_PORT", "FASTMCP_PORT"))
-    public_url: str | None = Field(default=None, validation_alias="OBSIDIAN_MCP_PUBLIC_URL")
-    auth_token: str | None = Field(default=None, validation_alias="OBSIDIAN_MCP_AUTH_TOKEN")
+    host: str = Field(default="127.0.0.1")
+    port: int = Field(default=8000)
+    public_url: str | None = Field(default=None)
+    auth_token: str | None = Field(default=None)
 
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OBSIDIAN_MCP_OPENAI_API_KEY", "OPENAI_API_KEY"),
-    )
-    embedding_model: str = Field(default="text-embedding-3-small", validation_alias="OBSIDIAN_MCP_EMBEDDING_MODEL")
-    embedding_dimensions: int | None = Field(default=None, validation_alias="OBSIDIAN_MCP_EMBEDDING_DIMENSIONS")
-    embedding_batch_size: int = Field(default=64, validation_alias="OBSIDIAN_MCP_EMBEDDING_BATCH_SIZE")
+    openai_api_key: SecretStr | None = Field(default=None)
+    embedding_model: str = Field(default="text-embedding-3-small")
+    embedding_dimensions: int | None = Field(default=None)
+    embedding_batch_size: int = Field(default=64)
 
     @property
     def vault(self) -> VaultSettings:

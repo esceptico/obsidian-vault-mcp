@@ -1,7 +1,3 @@
-"""Shared module-level constants. Every literal that has meaning lives here
-so call sites stay self-documenting and tunable values are easy to find.
-"""
-
 # --- Filesystem & writes -----------------------------------------------------
 MAX_NOTE_BYTES = 5 * 1024 * 1024
 """Largest note body accepted by create_note / update_note (5 MiB)."""
