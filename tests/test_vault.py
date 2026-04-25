@@ -111,6 +111,34 @@ class VaultTests(unittest.TestCase):
             trash_dir = Path(tmp.name) / ".trash"
             self.assertEqual(len(list(trash_dir.iterdir())), 2)
 
+    def test_concurrent_searches_only_rebuild_once(self) -> None:
+        import threading
+
+        tmp, vault = self.make_vault()
+        with tmp:
+            for i in range(5):
+                vault.create_note(f"N{i}", f"hello {i}")
+            rebuild_calls = {"n": 0}
+            original = vault._index.rebuild
+
+            def counting_rebuild(notes):
+                rebuild_calls["n"] += 1
+                return original(notes)
+
+            vault._index.rebuild = counting_rebuild  # type: ignore[assignment]
+            vault.invalidate_index()
+
+            threads = [
+                threading.Thread(target=lambda: vault.search("hello", mode="bm25"))
+                for _ in range(8)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            self.assertEqual(rebuild_calls["n"], 1)
+
     def test_atomic_write_unique_tmp_and_fsync(self) -> None:
         import os
         from unittest.mock import patch

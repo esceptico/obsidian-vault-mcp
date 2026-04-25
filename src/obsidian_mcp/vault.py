@@ -1,6 +1,7 @@
 import os
 import secrets
 import shutil
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,7 @@ class Vault:
             raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
         self._index = SearchIndex(self.root / ".obsidian-mcp" / "index.sqlite", embeddings or EmbeddingSettings())
         self._index_dirty = True
+        self._lock = threading.RLock()
 
     def list(self, path: str = "") -> list[dict[str, Any]]:
         directory = self.resolve(path)
@@ -80,13 +82,16 @@ class Vault:
         frontmatter: dict[str, Any] | None = None,
         overwrite: bool = False,
     ) -> dict[str, Any]:
-        note_path = self.resolve_for_write(_ensure_md(path))
-        if note_path.exists() and not overwrite:
-            raise FileExistsError(f"Refusing to overwrite existing note: {path}")
-        note_path.parent.mkdir(parents=True, exist_ok=True)
-        self._atomic_write(note_path, render_frontmatter(frontmatter or {}, content))
-        self.invalidate_index()
-        return {"ok": True, "path": self.relative(note_path)}
+        with self._lock:
+            note_path = self.resolve_for_write(_ensure_md(path))
+            if note_path.exists() and not overwrite:
+                raise FileExistsError(f"Refusing to overwrite existing note: {path}")
+            note_path.parent.mkdir(parents=True, exist_ok=True)
+            self._atomic_write(note_path, render_frontmatter(frontmatter or {}, content))
+            self.invalidate_index()
+            rel = self.relative(note_path)
+            log.info("create_note path=%s", rel)
+            return {"ok": True, "path": rel}
 
     def update_note(
         self,
@@ -94,23 +99,35 @@ class Vault:
         content: str | None = None,
         frontmatter_patch: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        note_path = self.resolve(path)
-        if not note_path.is_file():
-            raise ValueError(f"Not a file: {path}")
-        existing = note_path.read_text(encoding="utf-8")
-        _, body = split_frontmatter(existing)
-        next_content = existing
-        if content is not None:
-            current_frontmatter, _ = split_frontmatter_raw(existing)
-            next_content = render_frontmatter(current_frontmatter, content)
-        if frontmatter_patch:
-            next_content = patch_frontmatter(next_content, frontmatter_patch)
-        if next_content != existing:
-            self._atomic_write(note_path, next_content)
-            self.invalidate_index()
-        return {"ok": True, "path": self.relative(note_path), "changed": next_content != existing, "previous_body": body}
+        with self._lock:
+            note_path = self.resolve(path)
+            if not note_path.is_file():
+                raise ValueError(f"Not a file: {path}")
+            existing = note_path.read_text(encoding="utf-8")
+            _, body = split_frontmatter(existing)
+            next_content = existing
+            if content is not None:
+                current_frontmatter, _ = split_frontmatter_raw(existing)
+                next_content = render_frontmatter(current_frontmatter, content)
+            if frontmatter_patch:
+                next_content = patch_frontmatter(next_content, frontmatter_patch)
+            changed = next_content != existing
+            if changed:
+                self._atomic_write(note_path, next_content)
+                self.invalidate_index()
+                log.info("update_note path=%s", self.relative(note_path))
+            return {
+                "ok": True,
+                "path": self.relative(note_path),
+                "changed": changed,
+                "previous_body": body,
+            }
 
     def move_path(self, source: str, destination: str, rewrite_links: bool = True, overwrite: bool = False) -> dict[str, Any]:
+        with self._lock:
+            return self._move_path_locked(source, destination, rewrite_links, overwrite)
+
+    def _move_path_locked(self, source: str, destination: str, rewrite_links: bool, overwrite: bool) -> dict[str, Any]:
         src = self.resolve(source)
         dst = self.resolve_for_write(destination)
         if not src.exists():
@@ -175,43 +192,47 @@ class Vault:
         }
 
     def delete_path(self, path: str, recursive: bool = False, strategy: str = "trash") -> dict[str, Any]:
-        target = self.resolve(path)
-        if target == self.root:
-            raise ValueError("Refusing to delete the vault root")
-        if self._is_ignored_path(target):
-            raise ValueError(f"Refusing to delete reserved path: {path}")
-        if not target.exists():
-            raise FileNotFoundError(path)
+        with self._lock:
+            target = self.resolve(path)
+            if target == self.root:
+                raise ValueError("Refusing to delete the vault root")
+            if self._is_ignored_path(target):
+                raise ValueError(f"Refusing to delete reserved path: {path}")
+            if not target.exists():
+                raise FileNotFoundError(path)
 
-        if target.is_dir():
-            visible = [c for c in target.iterdir() if not self._is_ignored_path(c)]
-            if visible and not recursive:
-                raise ValueError("Directory is not empty; pass recursive=True")
-
-        if strategy == "trash":
-            trash = self.resolve_for_write(self.settings.trash_path)
-            trash.mkdir(parents=True, exist_ok=True)
-            destination = self._unique_trash_destination(trash, target.name)
-            shutil.move(str(target), str(destination))
-            result = {"ok": True, "path": path, "trashed_to": self.relative(destination)}
-        elif strategy == "delete":
             if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
-            result = {"ok": True, "path": path, "deleted": True}
-        else:
-            raise ValueError("strategy must be 'trash' or 'delete'")
+                visible = [c for c in target.iterdir() if not self._is_ignored_path(c)]
+                if visible and not recursive:
+                    raise ValueError("Directory is not empty; pass recursive=True")
 
-        self.invalidate_index()
-        return result
+            log.info("delete_path path=%s strategy=%s recursive=%s", path, strategy, recursive)
+
+            if strategy == "trash":
+                trash = self.resolve_for_write(self.settings.trash_path)
+                trash.mkdir(parents=True, exist_ok=True)
+                destination = self._unique_trash_destination(trash, target.name)
+                shutil.move(str(target), str(destination))
+                result = {"ok": True, "path": path, "trashed_to": self.relative(destination)}
+            elif strategy == "delete":
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+                result = {"ok": True, "path": path, "deleted": True}
+            else:
+                raise ValueError("strategy must be 'trash' or 'delete'")
+
+            self.invalidate_index()
+            return result
 
     def search(self, query: str, limit: int = 10, mode: str = "hybrid") -> dict[str, Any]:
-        if self._index_dirty:
-            self._index.rebuild(
-                [IndexedNote(path=path, content=content) for path, content in self._markdown_files().items()]
-            )
-            self._index_dirty = False
+        with self._lock:
+            if self._index_dirty:
+                self._index.rebuild(
+                    [IndexedNote(path=path, content=content) for path, content in self._markdown_files().items()]
+                )
+                self._index_dirty = False
         return self._index.search(query=query, limit=limit, mode=mode)  # type: ignore[arg-type]
 
     def backlinks(self, path: str) -> dict[str, Any]:
