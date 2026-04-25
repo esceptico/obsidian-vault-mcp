@@ -1,3 +1,4 @@
+import hmac
 from typing import Any
 
 from mcp.server.auth.provider import AccessToken, TokenVerifier
@@ -6,7 +7,11 @@ from mcp.server.fastmcp import FastMCP
 from pydantic import AnyHttpUrl
 
 from obsidian_mcp.config import ServerSettings, load_settings
+from obsidian_mcp.logging import get_logger
 from obsidian_mcp.vault import Vault
+
+log = get_logger("server")
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 class StaticTokenVerifier(TokenVerifier):
@@ -14,7 +19,7 @@ class StaticTokenVerifier(TokenVerifier):
         self.token = token
 
     async def verify_token(self, token: str) -> AccessToken | None:
-        if token != self.token:
+        if not hmac.compare_digest(token, self.token):
             return None
         return AccessToken(token=token, client_id="obsidian-mcp-client", scopes=["vault"])
 
@@ -27,6 +32,26 @@ class Runtime:
 
 def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
     settings = settings or load_settings()
+
+    if not settings.auth_token and settings.host not in LOOPBACK_HOSTS:
+        raise RuntimeError(
+            "AUTH DISABLED: refusing to bind a non-loopback host without OBSIDIAN_MCP_AUTH_TOKEN. "
+            "Set the token, or bind to 127.0.0.1."
+        )
+
+    if settings.auth_token and settings.public_url is None and settings.host not in LOOPBACK_HOSTS:
+        log.warning(
+            "auth_token is set but OBSIDIAN_MCP_PUBLIC_URL is not; OAuth metadata will advertise %s. "
+            "Reverse-proxied deployments must set OBSIDIAN_MCP_PUBLIC_URL.",
+            settings.resolved_public_url,
+        )
+
+    if not settings.auth_token:
+        log.warning(
+            "auth_token not set; tools are exposed without authentication on %s",
+            settings.host,
+        )
+
     auth = None
     verifier = None
     if settings.auth_token:
