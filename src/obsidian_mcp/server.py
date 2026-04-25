@@ -29,6 +29,14 @@ _TRANSPORT_PATH = "/mcp"
 _REALM = "obsidian-mcp"
 _UNAUTHORIZED_BODY = b'{"error":"unauthorized"}'
 
+# Spec-compliant MCP clients (Inspector, Claude.ai) probe these well-known
+# paths whenever they receive a 401, looking for an OAuth flow. We're not
+# OAuth — we're static bearer. Letting the probes through (so they 404 from
+# the inner app instead of 401 from us) tells the client to skip discovery
+# and use the bearer immediately, instead of looping the whole list.
+_AUTH_BYPASS_PATH_PREFIXES = ("/.well-known/",)
+_AUTH_BYPASS_METHODS = frozenset({"OPTIONS"})
+
 # CORS allowlist for browser-based clients (MCP Inspector at localhost:6274,
 # Claude.ai web client, etc.). The bearer-token middleware is the actual
 # security gate — CORS just lets the preflight succeed so the real request
@@ -54,7 +62,7 @@ class BearerAuthMiddleware:
         self._expected = f"Bearer {token}"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] != "http" or _is_auth_bypassed(scope):
             await self._app(scope, receive, send)
             return
         provided = _bearer_header(scope)
@@ -62,6 +70,13 @@ class BearerAuthMiddleware:
             await _send_unauthorized(send)
             return
         await self._app(scope, receive, send)
+
+
+def _is_auth_bypassed(scope: Scope) -> bool:
+    if scope.get("method") in _AUTH_BYPASS_METHODS:
+        return True
+    path = scope.get("path", "")
+    return any(path.startswith(prefix) for prefix in _AUTH_BYPASS_PATH_PREFIXES)
 
 
 def _bearer_header(scope: Scope) -> str:
