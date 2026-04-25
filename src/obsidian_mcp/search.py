@@ -21,6 +21,16 @@ class SearchIndex:
     def __init__(self, database_path: Path, embeddings: EmbeddingSettings):
         self.embeddings = embeddings
         self.store = SearchStore(database_path)
+        self._openai_client: OpenAI | None = None
+
+    def _client(self) -> OpenAI:
+        if self._openai_client is None:
+            self._openai_client = OpenAI(
+                api_key=self.embeddings.api_key,
+                max_retries=3,
+                timeout=30.0,
+            )
+        return self._openai_client
 
     def rebuild(self, notes: list[IndexedNote]) -> None:
         records = [_stored_note(note) for note in notes]
@@ -100,7 +110,6 @@ class SearchIndex:
     def _embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        client = OpenAI(api_key=self.embeddings.api_key)
         request: dict = {
             "model": self.embeddings.model,
             "input": texts,
@@ -108,7 +117,7 @@ class SearchIndex:
         }
         if self.embeddings.dimensions is not None:
             request["dimensions"] = self.embeddings.dimensions
-        response = client.embeddings.create(**request)
+        response = self._client().embeddings.create(**request)
         return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
 
 

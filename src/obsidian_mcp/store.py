@@ -119,7 +119,12 @@ class SearchStore:
         with self.connect() as connection:
             connection.execute(PRAGMA_JOURNAL_MODE)
             connection.execute(PRAGMA_SYNCHRONOUS)
-            connection.execute(CREATE_NOTES_TABLE)
+            try:
+                connection.execute(CREATE_NOTES_TABLE)
+            except sqlite3.OperationalError as exc:
+                raise RuntimeError(
+                    "This Python SQLite build does not include FTS5 support"
+                ) from exc
             connection.execute(CREATE_EMBEDDINGS_TABLE)
 
     def replace_notes(self, notes: list[StoredNote]) -> None:
@@ -152,13 +157,8 @@ class SearchStore:
             return connection.execute(COUNT_NOTES).fetchone()[0]
 
     def search_fts(self, query: str, limit: int) -> list[FtsHit]:
-        try:
-            with self.connect() as connection:
-                rows = connection.execute(SEARCH_FTS, (query, limit)).fetchall()
-        except sqlite3.OperationalError as exc:
-            if "fts5" in str(exc).lower():
-                raise RuntimeError("This Python SQLite build does not include FTS5 support") from exc
-            raise
+        with self.connect() as connection:
+            rows = connection.execute(SEARCH_FTS, (query, limit)).fetchall()
 
         return [
             FtsHit(

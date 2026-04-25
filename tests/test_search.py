@@ -42,6 +42,16 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(hybrid["hits"][0]["source"], "hybrid")
 
 
+    def test_openai_client_is_reused(self) -> None:
+        from obsidian_mcp.search import SearchIndex
+        from obsidian_mcp.config import EmbeddingSettings
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = SearchIndex(
+                Path(tmp) / "i.sqlite",
+                EmbeddingSettings(api_key="k", model="text-embedding-3-small"),
+            )
+            self.assertIs(idx._client(), idx._client())
+
     def test_upsert_does_not_full_rebuild(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             index = SearchIndex(Path(tmp) / "i.sqlite", EmbeddingSettings())

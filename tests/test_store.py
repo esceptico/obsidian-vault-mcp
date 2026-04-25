@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from dataclasses import replace
@@ -36,6 +37,14 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.search_fts('"alpha"', 10)[0].path, "Alpha.md")
             store.delete_note("Alpha.md")
             self.assertEqual(store.search_fts('"alpha"', 10), [])
+
+    def test_search_fts_propagates_real_syntax_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SearchStore(Path(tmp) / "i.sqlite")
+            store.upsert_note(_note(body="x", search_text="Alpha x"))
+            # Bare reserved word (no quoting) is an FTS5 syntax error.
+            with self.assertRaises(sqlite3.OperationalError):
+                store.search_fts("AND", 1)
 
     def test_replace_notes_evicts_changed_embeddings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
