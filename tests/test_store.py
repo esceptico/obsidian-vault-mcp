@@ -90,6 +90,32 @@ class StoreTests(unittest.TestCase):
             meta = store.all_records()["Alpha.md"]
             self.assertIsNone(meta.embedded_hash)
 
+    def test_legacy_index_file_self_heals_on_init(self) -> None:
+        """A stale index.sqlite from an older schema (FTS rows present, no
+        note_meta, no schema_version) must not blow up the first upsert with
+        a rowid collision — it should be wiped and rebuilt."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "i.sqlite"
+            # Manually plant a legacy `notes` FTS table populated up to rowid=3.
+            import sqlite3
+            with sqlite3.connect(db_path) as raw:
+                raw.execute(
+                    "CREATE VIRTUAL TABLE notes USING fts5("
+                    "path UNINDEXED, title, frontmatter, body, tags, tokenize='unicode61')"
+                )
+                for i in range(1, 4):
+                    raw.execute(
+                        "INSERT INTO notes(path, title, frontmatter, body, tags) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (f"Old{i}.md", "old", "{}", "old", ""),
+                    )
+            # New SearchStore should detect the missing schema_version, drop
+            # the legacy table, and let upsert_note succeed without collision.
+            store = SearchStore(db_path)
+            rowid = store.upsert_note(_note(path="Fresh.md", content_hash="fresh"))
+            self.assertGreater(rowid, 0)
+            self.assertEqual(list(store.all_records()), ["Fresh.md"])
+
     def test_dim_mismatch_recreates_vec_table_and_clears_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SearchStore(Path(tmp) / "i.sqlite")

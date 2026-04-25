@@ -32,6 +32,17 @@ OPENAI_MAX_RETRIES = 3
 EMBEDDING_TIMEOUT_SECONDS = 30.0
 """Per-request timeout for embedding calls."""
 
+EMBEDDING_MAX_INPUT_TOKENS = 8000
+"""Token cap fed to the embedding model. text-embedding-3-* hard-limits
+inputs to 8192 tokens; we leave a 192-token safety margin. Notes longer
+than this still get FTS-indexed in full — only the embedding input is
+truncated. Chunking would preserve more signal but is out of scope."""
+
+EMBEDDING_FALLBACK_ENCODING = "cl100k_base"
+"""Tokenizer used when tiktoken doesn't recognize the configured model
+(e.g. preview/experimental models). cl100k_base is the encoding shared
+by gpt-3.5/4 and the text-embedding-3-* family."""
+
 
 # --- Server ------------------------------------------------------------------
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -39,3 +50,10 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+
+
+# --- File watcher ------------------------------------------------------------
+WATCHER_DEBOUNCE_SECONDS = 0.5
+"""How long a path must be quiet before the watcher applies its index update.
+Editors typically fire several FS events per save (tmp write + rename +
+fsync); coalescing within this window collapses them to one update."""

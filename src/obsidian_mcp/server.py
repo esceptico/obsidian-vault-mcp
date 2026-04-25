@@ -93,15 +93,11 @@ async def _send_unauthorized(send: Send) -> None:
     await send({"type": "http.response.body", "body": _UNAUTHORIZED_BODY})
 
 
-class Runtime:
-    def __init__(self, settings: ServerSettings):
-        self.settings = settings
-        self.vault = Vault(settings.vault, settings.embeddings)
-
-
-def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
+def create_mcp(settings: ServerSettings | None = None, vault: Vault | None = None) -> FastMCP:
     settings = settings or load_settings()
     _validate_auth_posture(settings)
+    if vault is None:
+        vault = Vault(settings.vault, settings.embeddings)
     mcp = FastMCP(
         "Obsidian Vault MCP",
         instructions="Headless tools for an Obsidian-flavored Markdown vault.",
@@ -110,8 +106,7 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
         stateless_http=True,
         json_response=True,
     )
-    runtime = Runtime(settings)
-    _register_tools(mcp, runtime)
+    _register_tools(mcp, vault)
     return mcp
 
 
@@ -145,7 +140,7 @@ def _validate_auth_posture(settings: ServerSettings) -> None:
         log.warning(_AUTH_DISABLED_LOOPBACK_WARNING, settings.host)
 
 
-def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
+def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     """Tool surface. Defaults here are deliberately minimal — only those that
     materially improve client UX (search mode/limit, default destructive
     strategy=trash). Everything else is required."""
@@ -153,12 +148,12 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
     @mcp.tool()
     def vault_list(path: str) -> list[dict[str, Any]]:
         """List files and directories under a vault-relative path. Pass "" for the vault root."""
-        return runtime.vault.list(path)
+        return vault.list(path)
 
     @mcp.tool()
     def vault_read(path: str) -> dict[str, Any]:
         """Read a Markdown file with frontmatter, links, tags, and content."""
-        return runtime.vault.read(path)
+        return vault.read(path)
 
     @mcp.tool()
     def vault_search(
@@ -167,7 +162,7 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
         mode: SearchMode = SearchMode.HYBRID,
     ) -> dict[str, Any]:
         """Search vault notes. Hybrid combines FTS5 + embeddings; vector requires OPENAI_API_KEY."""
-        return runtime.vault.search(query, limit, mode)
+        return vault.search(query, limit, mode)
 
     @mcp.tool()
     def vault_create_note(
@@ -177,7 +172,7 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
         overwrite: bool,
     ) -> dict[str, Any]:
         """Create a Markdown note. Pass `overwrite=true` to replace an existing one."""
-        return runtime.vault.create_note(path, content, frontmatter, overwrite)
+        return vault.create_note(path, content, frontmatter, overwrite)
 
     @mcp.tool()
     def vault_update_note(
@@ -186,7 +181,7 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
         frontmatter_patch: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Replace a note body and/or patch YAML frontmatter. Null patch values delete keys."""
-        return runtime.vault.update_note(path, content, frontmatter_patch)
+        return vault.update_note(path, content, frontmatter_patch)
 
     @mcp.tool()
     def vault_move_path(
@@ -196,7 +191,7 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
         overwrite: bool,
     ) -> dict[str, Any]:
         """Move or rename a file/directory, with wikilink rewriting for note renames."""
-        return runtime.vault.move_path(source, destination, rewrite_links, overwrite)
+        return vault.move_path(source, destination, rewrite_links, overwrite)
 
     @mcp.tool()
     def vault_delete_path(
@@ -205,25 +200,30 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
         strategy: DeleteStrategy = DeleteStrategy.TRASH,
     ) -> dict[str, Any]:
         """Delete a file or directory. `strategy=trash` (default) preserves the file in .trash/."""
-        return runtime.vault.delete_path(path, recursive, strategy)
+        return vault.delete_path(path, recursive, strategy)
 
     @mcp.tool()
     def vault_backlinks(path: str) -> dict[str, Any]:
         """Find notes that link to a target note via Obsidian wikilinks."""
-        return runtime.vault.backlinks(path)
+        return vault.backlinks(path)
 
     @mcp.tool()
     def vault_reindex() -> dict[str, Any]:
         """Re-scan the vault from disk and bring the index up to date.
         Returns a diff summary (added / modified / removed / unchanged / embedded)."""
-        return {"ok": True, **runtime.vault.reindex()}
+        return {"ok": True, **vault.reindex()}
 
 
 def main() -> None:
     settings = load_settings()
-    mcp = create_mcp(settings)
-    app = build_asgi_app(settings, mcp)
-    uvicorn.run(app, host=settings.host, port=settings.port)
+    vault = Vault(settings.vault, settings.embeddings)
+    mcp = create_mcp(settings, vault)
+    vault.start_watching()
+    try:
+        app = build_asgi_app(settings, mcp)
+        uvicorn.run(app, host=settings.host, port=settings.port)
+    finally:
+        vault.stop_watching()
 
 
 if __name__ == "__main__":

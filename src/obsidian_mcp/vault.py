@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from obsidian_mcp.config import EmbeddingSettings, VaultSettings
+from obsidian_mcp.constants import (
+    MAX_FRONTMATTER_DEPTH,
+    MAX_NOTE_BYTES,
+    TRASH_TIMESTAMP_FORMAT,
+    WATCHER_DEBOUNCE_SECONDS,
+)
 from obsidian_mcp.frontmatter import (
     patch_frontmatter,
     render_frontmatter,
@@ -18,8 +24,7 @@ from obsidian_mcp.logging import get_logger
 from obsidian_mcp.obsidian import block_ids, inline_tags, markdown_links, rewrite_wikilink_targets, wikilinks
 from obsidian_mcp.search import IndexedNote, SearchIndex
 from obsidian_mcp.types import DeleteStrategy, EntryKind, SearchMode
-
-from obsidian_mcp.constants import MAX_FRONTMATTER_DEPTH, MAX_NOTE_BYTES, TRASH_TIMESTAMP_FORMAT
+from obsidian_mcp.watcher import VaultWatcher
 
 log = get_logger("vault")
 
@@ -40,12 +45,60 @@ class Vault:
             raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
         self._index = SearchIndex(self.root / ".obsidian-mcp" / "index.sqlite", embeddings or EmbeddingSettings())
         self._lock = threading.RLock()
+        self._watcher: VaultWatcher | None = None
         # Reconcile the index against disk at startup so the first search
         # doesn't pay rebuild latency. Subsequent writes go through
         # upsert_note / delete_note. Out-of-band edits are picked up by
-        # the next sync_from_disk() (called by vault_reindex or the file
-        # watcher, when wired in).
+        # the file watcher (start_watching) or, as a fallback, by an
+        # explicit vault_reindex call.
         self.sync_from_disk()
+
+    # ----- file watcher lifecycle ------------------------------------------
+
+    def start_watching(self) -> None:
+        """Begin observing the vault for out-of-band edits and apply them
+        through the regular upsert/delete index paths. Idempotent."""
+        if self._watcher is not None:
+            return
+        self._watcher = VaultWatcher(
+            root=self.root,
+            on_upsert=self._apply_external_upsert,
+            on_delete=self._apply_external_delete,
+            is_ignored=self._is_ignored_path,
+            debounce_seconds=WATCHER_DEBOUNCE_SECONDS,
+        )
+        self._watcher.start()
+
+    def stop_watching(self) -> None:
+        if self._watcher is None:
+            return
+        self._watcher.stop()
+        self._watcher = None
+
+    def _apply_external_upsert(self, rel: str) -> None:
+        full = self.root / rel
+        if not full.is_file():
+            # Race: the file was deleted between the event firing and now.
+            self._apply_external_delete(rel)
+            return
+        try:
+            content = full.read_text(encoding="utf-8")
+        except OSError:
+            log.warning("watcher could not read %s; skipping", rel)
+            return
+        with self._lock:
+            self._index.upsert_note(IndexedNote(path=rel, content=content))
+        log.info("watcher upsert path=%s", rel)
+
+    def _apply_external_delete(self, rel: str) -> None:
+        if (self.root / rel).exists():
+            # Editor save patterns can fire delete-then-create; if the file
+            # is back, treat it as an upsert.
+            self._apply_external_upsert(rel)
+            return
+        with self._lock:
+            self._index.delete_note(rel)
+        log.info("watcher delete path=%s", rel)
 
     def list(self, path: str) -> list[dict[str, Any]]:
         directory = self.resolve(path)

@@ -21,6 +21,11 @@ _PRAGMAS = (
     "PRAGMA foreign_keys=ON",
 )
 
+# Bumped whenever a table layout in this file changes in an incompatible
+# way. On mismatch we delete the index file and start fresh — the vault
+# itself is the source of truth and Vault.sync_from_disk() repopulates.
+_SCHEMA_VERSION = 1
+
 # Source of truth for note identity. rowid is stable per path and shared with
 # the FTS5 `notes` table and the sqlite-vec `vec_notes` table.
 _CREATE_NOTE_META = """
@@ -181,9 +186,36 @@ class SearchStore:
     def __init__(self, database_path: Path):
         self.database_path = database_path
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._delete_if_stale_schema()
         self._initialize_schema()
 
     # ----- schema lifecycle -------------------------------------------------
+
+    def _delete_if_stale_schema(self) -> None:
+        """If a database file from an older _SCHEMA_VERSION exists, delete it.
+        The vault itself is the source of truth — Vault.sync_from_disk()
+        repopulates from scratch."""
+        if not self.database_path.exists():
+            return
+        # NB: sqlite3.Connection's context manager only commits/rolls back,
+        # it does NOT close the connection. We close explicitly so the file
+        # handle is gone before unlink (matters on iCloud-managed paths).
+        conn = sqlite3.connect(self.database_path)
+        try:
+            try:
+                row = conn.execute(
+                    "SELECT value FROM index_meta WHERE key = 'schema_version'"
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = None  # legacy file: no index_meta table
+        finally:
+            conn.close()
+        if row is not None and int(row[0]) == _SCHEMA_VERSION:
+            return
+        for suffix in ("", "-wal", "-shm"):
+            stale = Path(str(self.database_path) + suffix)
+            if stale.exists():
+                stale.unlink()
 
     def _initialize_schema(self) -> None:
         with self.connect() as conn:
@@ -197,6 +229,10 @@ class SearchStore:
                 ) from exc
             conn.execute(_CREATE_NOTE_META)
             conn.execute(_CREATE_INDEX_META)
+            conn.execute(
+                "INSERT OR REPLACE INTO index_meta(key, value) VALUES ('schema_version', ?)",
+                (str(_SCHEMA_VERSION),),
+            )
 
     def _ensure_vec_table(self, conn: sqlite3.Connection, dimensions: int) -> None:
         """Create or recreate the vec0 table for the given dimension. If a
@@ -243,6 +279,10 @@ class SearchStore:
             if existing is None:
                 cursor = conn.execute(_INSERT_NOTE_META, (note.path, note.content_hash))
                 rowid = cursor.lastrowid
+                # Defensive: clear any orphan FTS row at this rowid before
+                # inserting. Should be a no-op on a clean DB; protects against
+                # half-migrated state where note_meta and notes drifted apart.
+                conn.execute(_DELETE_NOTE_FTS, (rowid,))
                 conn.execute(
                     _INSERT_NOTE_FTS,
                     (rowid, note.path, note.title, note.frontmatter_json, note.body, note.tags_text),
