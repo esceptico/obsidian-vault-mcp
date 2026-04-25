@@ -13,8 +13,11 @@ from obsidian_mcp.frontmatter import (
     split_frontmatter,
     split_frontmatter_raw,
 )
+from obsidian_mcp.logging import get_logger
 from obsidian_mcp.obsidian import block_ids, inline_tags, markdown_links, rewrite_wikilink_targets, wikilinks
 from obsidian_mcp.search import IndexedNote, SearchIndex
+
+log = get_logger("vault")
 
 
 @dataclass(frozen=True)
@@ -116,21 +119,59 @@ class Vault:
             raise FileExistsError(f"Destination already exists: {destination}")
 
         old_names = self._link_names_for(src)
-        new_name = dst.stem if dst.suffix == ".md" else dst.name
+        is_note_rename = (
+            rewrite_links and src.suffix == ".md" and dst.suffix == ".md" and bool(old_names)
+        )
+
+        pending_rewrites: list[tuple[Path, str]] = []
+        if is_note_rename:
+            new_bare = dst.stem
+            new_qualified = Path(self._relative_str(dst)).with_suffix("").as_posix()
+            same_stem_exists = any(
+                other.is_file()
+                and other.suffix == ".md"
+                and other.stem == new_bare
+                and other.resolve() != src.resolve()
+                and other.resolve() != dst.resolve()
+                and not self._is_ignored_path(other)
+                for other in self.root.rglob("*.md")
+            )
+
+            def replacement_for(matched_old: str) -> str:
+                if "/" in matched_old or same_stem_exists:
+                    return new_qualified
+                return new_bare
+
+            for path in self.root.rglob("*.md"):
+                if not path.is_file() or self._is_ignored_path(path):
+                    continue
+                original = path.read_text(encoding="utf-8")
+                updated = rewrite_wikilink_targets(original, old_names, replacement_for)
+                if updated != original:
+                    pending_rewrites.append((path, updated))
 
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
-
-        rewritten = 0
-        if rewrite_links and src.suffix == ".md" and dst.suffix == ".md" and old_names and old_names != {new_name}:
-            rewritten = self._rewrite_links(old_names, new_name)
+        try:
+            for path, new_content in pending_rewrites:
+                self._atomic_write(path, new_content)
+        except BaseException:
+            try:
+                shutil.move(str(dst), str(src))
+            except Exception:
+                log.exception("rollback of move %s -> %s failed", source, destination)
+            raise
 
         self.invalidate_index()
+        log.info(
+            "move_path source=%s destination=%s rewritten=%d",
+            source, self.relative(dst), len(pending_rewrites),
+        )
         return {
             "ok": True,
             "source": source,
             "destination": self.relative(dst),
-            "rewritten_files": rewritten,
+            "rewritten_files": len(pending_rewrites),
         }
 
     def delete_path(self, path: str, recursive: bool = False, strategy: str = "trash") -> dict[str, Any]:
@@ -206,6 +247,13 @@ class Vault:
     def relative(self, path: Path) -> str:
         return path.resolve().relative_to(self.root).as_posix()
 
+    def _relative_str(self, path: Path) -> str:
+        """Like relative() but does not require the path to exist on disk."""
+        try:
+            return path.resolve().relative_to(self.root).as_posix()
+        except (FileNotFoundError, ValueError):
+            return path.relative_to(self.root).as_posix()
+
     def _unique_trash_destination(self, trash_dir: Path, target_name: str) -> Path:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         base = trash_dir / f"{timestamp}-{target_name}"
@@ -226,18 +274,6 @@ class Vault:
             if path.is_file() and not self._is_ignored_path(path):
                 files[self.relative(path)] = path.read_text(encoding="utf-8")
         return files
-
-    def _rewrite_links(self, old_names: set[str], new_name: str) -> int:
-        changed = 0
-        for path in self.root.rglob("*.md"):
-            if not path.is_file():
-                continue
-            original = path.read_text(encoding="utf-8")
-            updated = rewrite_wikilink_targets(original, old_names, new_name)
-            if updated != original:
-                self._atomic_write(path, updated)
-                changed += 1
-        return changed
 
     def _link_names_for(self, path: Path) -> set[str]:
         names = {path.stem}

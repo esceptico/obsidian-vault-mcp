@@ -134,6 +134,43 @@ class VaultTests(unittest.TestCase):
             b = _tmp_name_for(Path(tmp.name) / "X.md")
             self.assertNotEqual(a.name, b.name)
 
+    def test_rename_preserves_folder_qualifier_on_collision(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("Projects/Old", "Body")
+            vault.create_note("Archive/New", "Other body")
+            vault.create_note("Ref", "See [[Projects/Old]] and [[Archive/New]].")
+            result = vault.move_path("Projects/Old.md", "Projects/New.md")
+            ref = vault.read("Ref.md")
+
+            self.assertEqual(result["rewritten_files"], 1)
+            self.assertIn("[[Projects/New]]", ref["content"])
+            self.assertIn("[[Archive/New]]", ref["content"])
+
+    def test_rename_preserves_folder_qualifier_when_source_was_qualified(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("Projects/Old", "Body")
+            vault.create_note("Ref", "See [[Projects/Old]].")
+            vault.move_path("Projects/Old.md", "Projects/Renamed.md")
+            ref = vault.read("Ref.md")
+            self.assertIn("[[Projects/Renamed]]", ref["content"])
+
+    def test_move_rolls_back_on_rewrite_failure(self) -> None:
+        from unittest.mock import patch
+
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("Old", "body")
+            vault.create_note("Ref", "[[Old]]")
+            with patch.object(vault, "_atomic_write", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    vault.move_path("Old.md", "New.md")
+            self.assertTrue((Path(tmp.name) / "Old.md").exists())
+            self.assertFalse((Path(tmp.name) / "New.md").exists())
+            ref_text = (Path(tmp.name) / "Ref.md").read_text(encoding="utf-8")
+            self.assertIn("[[Old]]", ref_text)
+
     def test_folder_qualified_wikilinks_are_matched(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
@@ -144,7 +181,8 @@ class VaultTests(unittest.TestCase):
             ref = vault.read("Ref.md")
 
             self.assertEqual(result["rewritten_files"], 1)
-            self.assertIn("[[New Note]]", ref["content"])
+            # Folder qualifier is preserved because the source link was qualified.
+            self.assertIn("[[Projects/New Note]]", ref["content"])
 
 
 if __name__ == "__main__":

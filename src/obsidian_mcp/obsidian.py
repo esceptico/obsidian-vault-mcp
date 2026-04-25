@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from typing import Callable
 
 
 WIKILINK_RE = re.compile(r"(?P<embed>!)?\[\[(?P<inner>[^\]\n]+)\]\]")
@@ -60,7 +61,22 @@ def block_ids(markdown: str) -> list[str]:
     return sorted(set(BLOCK_ID_RE.findall(markdown)))
 
 
-def rewrite_wikilink_targets(markdown: str, old_names: set[str], new_name: str) -> str:
+def rewrite_wikilink_targets(
+    markdown: str,
+    old_names: set[str],
+    replacement: str | Callable[[str], str],
+) -> str:
+    """Replace wikilink targets in `old_names` with `replacement`.
+
+    `replacement` is either a fixed string or a callable that receives the
+    matched original target and returns the substitution. The callable form
+    lets the caller emit a folder-qualified replacement when the source link
+    was qualified (so collisions with same-stem notes elsewhere are avoided).
+    """
+    if isinstance(replacement, str):
+        plain_new = replacement
+        replacement = lambda _matched: plain_new
+
     def replace(match: re.Match[str]) -> str:
         target, alias, heading, block_id = parse_wikilink_inner(match.group("inner"))
         if target not in old_names:
@@ -73,6 +89,6 @@ def rewrite_wikilink_targets(markdown: str, old_names: set[str], new_name: str) 
             suffix = f"#{heading}"
         alias_part = f"|{alias}" if alias else ""
         embed = "!" if match.group("embed") else ""
-        return f"{embed}[[{new_name}{suffix}{alias_part}]]"
+        return f"{embed}[[{replacement(target)}{suffix}{alias_part}]]"
 
     return WIKILINK_RE.sub(replace, markdown)
