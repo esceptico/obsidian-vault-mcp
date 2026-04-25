@@ -85,6 +85,32 @@ class VaultTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 vault.delete_path(".obsidian-mcp", recursive=True, strategy="delete")
 
+    def test_trash_does_not_overwrite_same_second(self) -> None:
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("A", "first")
+            fixed = datetime(2026, 4, 25, 12, 0, 0, tzinfo=timezone.utc)
+
+            class FrozenDateTime:
+                @classmethod
+                def now(cls, tz=None):
+                    return fixed
+                @staticmethod
+                def fromtimestamp(ts, tz=None):
+                    return datetime.fromtimestamp(ts, tz)
+
+            with patch("obsidian_mcp.vault.datetime", FrozenDateTime):
+                r1 = vault.delete_path("A.md", strategy="trash")
+                vault.create_note("A", "second")
+                r2 = vault.delete_path("A.md", strategy="trash")
+
+            self.assertNotEqual(r1["trashed_to"], r2["trashed_to"])
+            trash_dir = Path(tmp.name) / ".trash"
+            self.assertEqual(len(list(trash_dir.iterdir())), 2)
+
     def test_atomic_write_unique_tmp_and_fsync(self) -> None:
         import os
         from unittest.mock import patch

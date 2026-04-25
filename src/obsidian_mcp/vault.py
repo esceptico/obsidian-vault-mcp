@@ -150,7 +150,7 @@ class Vault:
         if strategy == "trash":
             trash = self.resolve_for_write(self.settings.trash_path)
             trash.mkdir(parents=True, exist_ok=True)
-            destination = trash / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{target.name}"
+            destination = self._unique_trash_destination(trash, target.name)
             shutil.move(str(target), str(destination))
             result = {"ok": True, "path": path, "trashed_to": self.relative(destination)}
         elif strategy == "delete":
@@ -205,6 +205,16 @@ class Vault:
 
     def relative(self, path: Path) -> str:
         return path.resolve().relative_to(self.root).as_posix()
+
+    def _unique_trash_destination(self, trash_dir: Path, target_name: str) -> Path:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        base = trash_dir / f"{timestamp}-{target_name}"
+        candidate = base
+        suffix = 1
+        while candidate.exists():
+            candidate = base.with_name(f"{base.stem}-{suffix}{base.suffix}")
+            suffix += 1
+        return candidate
 
     def _ensure_inside_root(self, path: Path) -> None:
         if os.path.commonpath([self.root, path]) != str(self.root):
