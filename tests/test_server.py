@@ -118,38 +118,25 @@ class BuildAsgiAppTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
-    def test_well_known_discovery_paths_return_404_unauthenticated(self) -> None:
-        """MCP Inspector and other spec-compliant clients probe these well-known
-        paths whenever they see a 401 — if we 401 the probes too, the client
-        loops through the whole discovery list before falling back to the
-        static bearer. 404 on each (not 401) lets the client skip ahead."""
+    def test_cors_allows_mcp_protocol_version_header(self) -> None:
+        """Per the Streamable HTTP spec, clients MUST send MCP-Protocol-Version
+        on every request after handshake. If the CORS allow_headers list
+        doesn't include it, browser preflight rejects the actual request and
+        the user sees `TypeError: Failed to fetch`."""
         settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
         app = build_asgi_app(settings, create_mcp(settings))
         client = TestClient(app)
-        for path in (
-            "/.well-known/oauth-protected-resource",
-            "/.well-known/oauth-protected-resource/mcp",
-            "/.well-known/oauth-authorization-server",
-            "/.well-known/openid-configuration",
-        ):
-            with self.subTest(path=path):
-                response = client.get(path)  # no Authorization header
-                self.assertEqual(response.status_code, 404, f"{path} should 404, got {response.status_code}")
-
-    def test_options_request_to_protocol_path_is_not_gated_by_bearer(self) -> None:
-        """OPTIONS doesn't carry MCP payload; the bearer guard should let it
-        through (CORS already handles valid preflights). Otherwise Inspector's
-        session lifecycle generates 401 noise."""
-        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
-        app = build_asgi_app(settings, create_mcp(settings))
-        # FastMCP's StreamableHTTP manager needs lifespan startup; TestClient
-        # only triggers that when used as a context manager.
-        with TestClient(app) as client:
-            # OPTIONS without Authorization, without preflight headers — CORS
-            # won't synthesize a 200, request reaches inner app. Inner may 4xx
-            # (FastMCP doesn't speak OPTIONS here) but must NOT be 401.
-            response = client.options("/mcp")
-        self.assertNotEqual(response.status_code, 401)
+        response = client.options(
+            "/mcp",
+            headers={
+                "Origin": "http://localhost:6274",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "MCP-Protocol-Version, Authorization, Content-Type",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        allowed = response.headers.get("access-control-allow-headers", "").lower()
+        self.assertIn("mcp-protocol-version", allowed)
 
 
 if __name__ == "__main__":

@@ -25,26 +25,26 @@ _PUBLIC_URL_MISSING_WARNING = (
 _AUTH_DISABLED_LOOPBACK_WARNING = (
     "auth_token not set; tools are exposed without authentication on %s"
 )
-_TRANSPORT_PATH = "/mcp"
 _REALM = "obsidian-mcp"
 _UNAUTHORIZED_BODY = b'{"error":"unauthorized"}'
 
-# Spec-compliant MCP clients (Inspector, Claude.ai) probe these well-known
-# paths whenever they receive a 401, looking for an OAuth flow. We're not
-# OAuth — we're static bearer. Letting the probes through (so they 404 from
-# the inner app instead of 401 from us) tells the client to skip discovery
-# and use the bearer immediately, instead of looping the whole list.
-_AUTH_BYPASS_PATH_PREFIXES = ("/.well-known/",)
-_AUTH_BYPASS_METHODS = frozenset({"OPTIONS"})
-
-# CORS allowlist for browser-based clients (MCP Inspector at localhost:6274,
-# Claude.ai web client, etc.). The bearer-token middleware is the actual
-# security gate — CORS just lets the preflight succeed so the real request
-# can carry the Authorization header.
-_CORS_ALLOW_ORIGINS = ("*",)
-_CORS_ALLOW_METHODS = ("GET", "POST", "DELETE", "OPTIONS")
-_CORS_ALLOW_HEADERS = ("Authorization", "Content-Type", "Accept", "Mcp-Session-Id")
-_CORS_EXPOSE_HEADERS = ("Mcp-Session-Id", "WWW-Authenticate")
+# Headers a browser MCP client may send. Per the Streamable HTTP spec
+# (modelcontextprotocol.io/specification/2025-06-18/basic/transports), clients
+# send Accept, Content-Type, Mcp-Session-Id (after initialize),
+# MCP-Protocol-Version (after handshake), and Last-Event-ID (when resuming an
+# SSE stream). Authorization is ours.
+_CORS_ALLOW_HEADERS = [
+    "Accept",
+    "Authorization",
+    "Content-Type",
+    "Last-Event-ID",
+    "Mcp-Session-Id",
+    "MCP-Protocol-Version",
+]
+# Browsers cannot read response headers via JS unless the server explicitly
+# exposes them. Mcp-Session-Id must be readable so the client can store and
+# forward it on subsequent requests.
+_CORS_EXPOSE_HEADERS = ["Mcp-Session-Id"]
 
 
 class BearerAuthMiddleware:
@@ -62,7 +62,7 @@ class BearerAuthMiddleware:
         self._expected = f"Bearer {token}"
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or _is_auth_bypassed(scope):
+        if scope["type"] != "http":
             await self._app(scope, receive, send)
             return
         provided = _bearer_header(scope)
@@ -70,13 +70,6 @@ class BearerAuthMiddleware:
             await _send_unauthorized(send)
             return
         await self._app(scope, receive, send)
-
-
-def _is_auth_bypassed(scope: Scope) -> bool:
-    if scope.get("method") in _AUTH_BYPASS_METHODS:
-        return True
-    path = scope.get("path", "")
-    return any(path.startswith(prefix) for prefix in _AUTH_BYPASS_PATH_PREFIXES)
 
 
 def _bearer_header(scope: Scope) -> str:
@@ -123,24 +116,21 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
 
 
 def build_asgi_app(settings: ServerSettings, mcp: FastMCP) -> ASGIApp:
-    """Compose the ASGI app served by uvicorn:
+    """ASGI stack: CORS (outermost) → BearerAuth → FastMCP StreamableHTTP.
 
-        CORSMiddleware  →  BearerAuthMiddleware  →  FastMCP StreamableHTTP app
-
-    CORS goes outermost so browser preflights (OPTIONS, no Authorization
-    header by spec) get a 200 + Access-Control-Allow-* response and never
-    reach the bearer guard. The actual POST/GET that follows still passes
-    through BearerAuthMiddleware and must carry the token.
+    CORS goes outermost so browser preflights succeed without auth — the
+    actual POST/GET that follows passes through BearerAuth and must carry
+    the token.
     """
     app: ASGIApp = mcp.streamable_http_app()
     if settings.auth_token:
         app = BearerAuthMiddleware(app, settings.auth_token)
     app = CORSMiddleware(
         app,
-        allow_origins=list(_CORS_ALLOW_ORIGINS),
-        allow_methods=list(_CORS_ALLOW_METHODS),
-        allow_headers=list(_CORS_ALLOW_HEADERS),
-        expose_headers=list(_CORS_EXPOSE_HEADERS),
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=_CORS_ALLOW_HEADERS,
+        expose_headers=_CORS_EXPOSE_HEADERS,
     )
     return app
 
