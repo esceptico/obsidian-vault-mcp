@@ -24,8 +24,10 @@ def main() -> None:
             os.environ["FASTMCP_HOST"] = args.host
         if args.port:
             os.environ["FASTMCP_PORT"] = str(args.port)
+        from obsidian_mcp.logging import configure_default_logging
         from obsidian_mcp.server import main as serve_main
 
+        configure_default_logging()
         serve_main()
         return
 
