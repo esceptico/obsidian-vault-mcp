@@ -61,6 +61,30 @@ class VaultTests(unittest.TestCase):
             self.assertIn("[[New Note|alias]]", ref["content"])
             self.assertIn("[[New Note#Heading]]", ref["content"])
 
+    def test_nested_dot_trash_is_visible(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            nested = Path(tmp.name) / "Projects" / ".trash" / "note.md"
+            nested.parent.mkdir(parents=True)
+            nested.write_text("hello", encoding="utf-8")
+            listed = vault.list("Projects/.trash")
+            self.assertEqual(len(listed), 1)
+            self.assertEqual(listed[0]["path"], "Projects/.trash/note.md")
+
+    def test_top_level_trash_is_hidden(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            (Path(tmp.name) / ".trash").mkdir()
+            (Path(tmp.name) / ".trash" / "x.md").write_text("x", encoding="utf-8")
+            self.assertNotIn(".trash", {entry["path"] for entry in vault.list()})
+
+    def test_delete_refuses_obsidian_mcp(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("Note", "x")
+            with self.assertRaises(ValueError):
+                vault.delete_path(".obsidian-mcp", recursive=True, strategy="delete")
+
     def test_atomic_write_unique_tmp_and_fsync(self) -> None:
         import os
         from unittest.mock import patch

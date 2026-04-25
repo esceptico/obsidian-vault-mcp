@@ -137,11 +137,15 @@ class Vault:
         target = self.resolve(path)
         if target == self.root:
             raise ValueError("Refusing to delete the vault root")
+        if self._is_ignored_path(target):
+            raise ValueError(f"Refusing to delete reserved path: {path}")
         if not target.exists():
             raise FileNotFoundError(path)
 
-        if target.is_dir() and any(target.iterdir()) and not recursive:
-            raise ValueError("Directory is not empty; pass recursive=True")
+        if target.is_dir():
+            visible = [c for c in target.iterdir() if not self._is_ignored_path(c)]
+            if visible and not recursive:
+                raise ValueError("Directory is not empty; pass recursive=True")
 
         if strategy == "trash":
             trash = self.resolve_for_write(self.settings.trash_path)
@@ -234,8 +238,8 @@ class Vault:
         return names
 
     def _is_ignored_path(self, path: Path) -> bool:
-        ignored_roots = {self.settings.trash_path, ".obsidian-mcp"}
-        return bool(ignored_roots.intersection(path.relative_to(self.root).parts))
+        parts = path.relative_to(self.root).parts
+        return bool(parts) and parts[0] in {self.settings.trash_path, ".obsidian-mcp"}
 
     def _atomic_write(self, path: Path, content: str) -> None:
         tmp = _tmp_name_for(path)
