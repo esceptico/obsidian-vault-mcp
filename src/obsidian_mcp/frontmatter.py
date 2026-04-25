@@ -7,9 +7,21 @@ from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.error import YAMLError
 
 
+_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
+
+
+def _timestamp_as_string(_constructor: Any, node: Any) -> str:
+    """Override ruamel's default timestamp constructor: return the original
+    scalar text instead of a Python date/datetime. Frontmatter values flow
+    out over MCP as JSON, where date objects aren't serializable, and treating
+    Obsidian's `created: 2024-01-15` as just a string is what users expect."""
+    return node.value
+
+
 _yaml = YAML(typ="rt")
 _yaml.default_flow_style = False
 _yaml.preserve_quotes = True
+_yaml.constructor.add_constructor(_TIMESTAMP_TAG, _timestamp_as_string)
 
 
 _OPEN_FENCES = ("---\n", "---\r\n")
@@ -37,7 +49,7 @@ def _parse_yaml(raw: str) -> MutableMapping[str, Any]:
 
 
 def split_frontmatter(markdown: str) -> tuple[dict[str, Any], str]:
-    """Public splitter that returns a plain dict (suitable for JSON serialization)."""
+    """Public splitter that returns a plain dict suitable for JSON serialization."""
     fm, body = split_frontmatter_raw(markdown)
     return dict(fm), body
 

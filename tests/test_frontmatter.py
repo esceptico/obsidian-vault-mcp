@@ -31,6 +31,31 @@ class FrontmatterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             split_frontmatter(content)
 
+    def test_dates_serialize_as_iso_strings(self) -> None:
+        """Obsidian daily-note frontmatter commonly has date/datetime values;
+        ruamel parses them as Python date objects which are not JSON
+        serializable. The public splitter must coerce them to strings so
+        vault_read / vault_search can return them over MCP."""
+        import json
+
+        content = (
+            "---\n"
+            "created: 2024-01-15\n"
+            "modified: 2024-01-15T09:30:00\n"
+            "tags:\n"
+            "  - daily\n"
+            "nested:\n"
+            "  due: 2025-12-31\n"
+            "---\n"
+            "body"
+        )
+        fm, _ = split_frontmatter(content)
+        # Must round-trip through json.dumps without TypeError.
+        encoded = json.dumps(fm)
+        self.assertIn("2024-01-15", encoded)
+        self.assertIn("2024-01-15T09:30:00", encoded)
+        self.assertIn("2025-12-31", encoded)
+
 
 if __name__ == "__main__":
     unittest.main()
