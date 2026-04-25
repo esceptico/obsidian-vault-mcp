@@ -1,4 +1,5 @@
 import os
+import secrets
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -232,9 +233,24 @@ class Vault:
         return bool(ignored_roots.intersection(path.relative_to(self.root).parts))
 
     def _atomic_write(self, path: Path, content: str) -> None:
-        tmp = path.with_name(f".{path.name}.tmp")
-        tmp.write_text(content, encoding="utf-8")
-        tmp.replace(path)
+        tmp = _tmp_name_for(path)
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
+            tmp.replace(path)
+        except BaseException:
+            if tmp.exists():
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+            raise
+
+
+def _tmp_name_for(path: Path) -> Path:
+    return path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
 
 
 def _clean_relative_path(path: str) -> Path:

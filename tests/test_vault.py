@@ -61,6 +61,29 @@ class VaultTests(unittest.TestCase):
             self.assertIn("[[New Note|alias]]", ref["content"])
             self.assertIn("[[New Note#Heading]]", ref["content"])
 
+    def test_atomic_write_unique_tmp_and_fsync(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        tmp, vault = self.make_vault()
+        with tmp:
+            called: dict[str, int] = {}
+            real_fsync = os.fsync
+
+            def spy_fsync(fd: int) -> None:
+                called["count"] = called.get("count", 0) + 1
+                return real_fsync(fd)
+
+            with patch("obsidian_mcp.vault.os.fsync", side_effect=spy_fsync):
+                vault.create_note("Note", "hello")
+
+            self.assertGreaterEqual(called.get("count", 0), 1)
+
+            from obsidian_mcp.vault import _tmp_name_for
+            a = _tmp_name_for(Path(tmp.name) / "X.md")
+            b = _tmp_name_for(Path(tmp.name) / "X.md")
+            self.assertNotEqual(a.name, b.name)
+
     def test_folder_qualified_wikilinks_are_matched(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
