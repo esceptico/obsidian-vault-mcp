@@ -3,6 +3,7 @@ from typing import Any
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from obsidian_mcp.config import ServerSettings, load_settings
@@ -27,6 +28,15 @@ _AUTH_DISABLED_LOOPBACK_WARNING = (
 _TRANSPORT_PATH = "/mcp"
 _REALM = "obsidian-mcp"
 _UNAUTHORIZED_BODY = b'{"error":"unauthorized"}'
+
+# CORS allowlist for browser-based clients (MCP Inspector at localhost:6274,
+# Claude.ai web client, etc.). The bearer-token middleware is the actual
+# security gate — CORS just lets the preflight succeed so the real request
+# can carry the Authorization header.
+_CORS_ALLOW_ORIGINS = ("*",)
+_CORS_ALLOW_METHODS = ("GET", "POST", "DELETE", "OPTIONS")
+_CORS_ALLOW_HEADERS = ("Authorization", "Content-Type", "Accept", "Mcp-Session-Id")
+_CORS_EXPOSE_HEADERS = ("Mcp-Session-Id", "WWW-Authenticate")
 
 
 class BearerAuthMiddleware:
@@ -98,11 +108,25 @@ def create_mcp(settings: ServerSettings | None = None) -> FastMCP:
 
 
 def build_asgi_app(settings: ServerSettings, mcp: FastMCP) -> ASGIApp:
-    """Compose the ASGI app served by uvicorn: FastMCP's StreamableHTTP app
-    optionally wrapped with the static-bearer guard."""
+    """Compose the ASGI app served by uvicorn:
+
+        CORSMiddleware  →  BearerAuthMiddleware  →  FastMCP StreamableHTTP app
+
+    CORS goes outermost so browser preflights (OPTIONS, no Authorization
+    header by spec) get a 200 + Access-Control-Allow-* response and never
+    reach the bearer guard. The actual POST/GET that follows still passes
+    through BearerAuthMiddleware and must carry the token.
+    """
     app: ASGIApp = mcp.streamable_http_app()
     if settings.auth_token:
         app = BearerAuthMiddleware(app, settings.auth_token)
+    app = CORSMiddleware(
+        app,
+        allow_origins=list(_CORS_ALLOW_ORIGINS),
+        allow_methods=list(_CORS_ALLOW_METHODS),
+        allow_headers=list(_CORS_ALLOW_HEADERS),
+        expose_headers=list(_CORS_EXPOSE_HEADERS),
+    )
     return app
 
 

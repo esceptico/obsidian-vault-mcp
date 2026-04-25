@@ -18,7 +18,7 @@ class ConfigTests(unittest.TestCase):
                 "OBSIDIAN_MCP_EMBEDDING_DIMENSIONS": "256",
             }
             with patch.dict(os.environ, env, clear=True):
-                settings = ServerSettings()
+                settings = ServerSettings(_env_file=None)  # type: ignore[call-arg]
 
         self.assertEqual(settings.vault.root, Path(tmp))
         self.assertEqual(settings.auth_token, "secret")

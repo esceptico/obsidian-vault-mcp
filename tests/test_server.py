@@ -56,7 +56,7 @@ class AuthPostureTests(unittest.TestCase):
     def _settings(self, **overrides) -> ServerSettings:
         env = {"OBSIDIAN_MCP_VAULT_ROOT": self._tmp.name, **overrides}
         with patch.dict(os.environ, env, clear=True):
-            return ServerSettings()
+            return ServerSettings(_env_file=None)  # type: ignore[call-arg]
 
     def test_non_loopback_without_token_refuses(self) -> None:
         with self.assertRaises(RuntimeError) as ctx:
@@ -85,7 +85,38 @@ class BuildAsgiAppTests(unittest.TestCase):
     def _settings(self, **overrides) -> ServerSettings:
         env = {"OBSIDIAN_MCP_VAULT_ROOT": self._tmp.name, **overrides}
         with patch.dict(os.environ, env, clear=True):
-            return ServerSettings()
+            return ServerSettings(_env_file=None)  # type: ignore[call-arg]
+
+    def test_cors_preflight_succeeds_without_auth(self) -> None:
+        """Browser preflight (OPTIONS) carries no Authorization header by design.
+        If the bearer guard rejects it, the actual request never runs and the
+        browser-based MCP Inspector loops on 401s. CORS middleware must short-
+        circuit preflights with 200 + Access-Control-Allow-* headers."""
+        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        app = build_asgi_app(settings, create_mcp(settings))
+        client = TestClient(app)
+        response = client.options(
+            "/mcp",
+            headers={
+                "Origin": "http://localhost:6274",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Authorization, Content-Type",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access-control-allow-origin", {k.lower() for k in response.headers})
+
+    def test_actual_request_still_requires_auth_after_cors(self) -> None:
+        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        app = build_asgi_app(settings, create_mcp(settings))
+        client = TestClient(app)
+        # POST with Origin (browser-style) but no Authorization → still 401.
+        response = client.post(
+            "/mcp",
+            headers={"Origin": "http://localhost:6274", "Content-Type": "application/json"},
+            content=b"{}",
+        )
+        self.assertEqual(response.status_code, 401)
 
     def test_no_oauth_metadata_endpoint_exists(self) -> None:
         """If FastMCP's AuthSettings is reintroduced, the OAuth-style
