@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.11.0",
     "pydantic-settings>=2.10.0",
     "ruamel.yaml>=0.18.10",
+    "sqlite-vec>=0.1.9",
 ]
 
 [project.scripts]

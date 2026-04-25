@@ -146,33 +146,35 @@ class VaultTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self._create(vault, "Big", "x" * (MAX_NOTE_BYTES + 1))
 
-    def test_concurrent_searches_only_rebuild_once(self) -> None:
-        import threading
-
+    def test_sync_from_disk_picks_up_out_of_band_changes(self) -> None:
+        """Editing a note directly on disk (e.g. from Obsidian Desktop) goes
+        invisible to search until sync_from_disk runs. vault_reindex / startup
+        sync are the documented ways to pick it up."""
         tmp, vault = self.make_vault()
         with tmp:
-            for i in range(5):
-                self._create(vault, f"N{i}", f"hello {i}")
-            rebuild_calls = {"n": 0}
-            original = vault._index.rebuild
+            self._create(vault, "Note", "original body")
+            # Tamper directly on disk, bypassing the Vault API.
+            (Path(tmp.name) / "Note.md").write_text("tampered cucumber", encoding="utf-8")
 
-            def counting_rebuild(notes):
-                rebuild_calls["n"] += 1
-                return original(notes)
+            # Search before sync: tampered content not yet indexed.
+            before = self._bm25(vault, "cucumber")["hits"]
+            self.assertEqual(before, [])
 
-            vault._index.rebuild = counting_rebuild  # type: ignore[assignment]
-            vault.invalidate_index()
+            summary = vault.sync_from_disk()
+            self.assertEqual(summary["modified"], 1)
 
-            threads = [
-                threading.Thread(target=lambda: self._bm25(vault, "hello"))
-                for _ in range(8)
-            ]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join()
+            after = self._bm25(vault, "cucumber")["hits"]
+            self.assertEqual(after[0]["path"], "Note.md")
 
-            self.assertEqual(rebuild_calls["n"], 1)
+    def test_sync_from_disk_removes_files_deleted_out_of_band(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            self._create(vault, "Note", "body")
+            (Path(tmp.name) / "Note.md").unlink()
+
+            summary = vault.sync_from_disk()
+            self.assertEqual(summary["removed"], 1)
+            self.assertEqual(self._bm25(vault, "body")["hits"], [])
 
     def test_atomic_write_unique_tmp_and_fsync(self) -> None:
         import os

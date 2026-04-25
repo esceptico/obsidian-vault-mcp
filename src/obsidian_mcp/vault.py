@@ -39,10 +39,13 @@ class Vault:
         if not self.root.exists() or not self.root.is_dir():
             raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
         self._index = SearchIndex(self.root / ".obsidian-mcp" / "index.sqlite", embeddings or EmbeddingSettings())
-        # Full rebuild only on first start (empty index) or explicit vault_reindex.
-        # Subsequent writes go through upsert/delete.
-        self._index_dirty = self._index.store.count_notes() == 0
         self._lock = threading.RLock()
+        # Reconcile the index against disk at startup so the first search
+        # doesn't pay rebuild latency. Subsequent writes go through
+        # upsert_note / delete_note. Out-of-band edits are picked up by
+        # the next sync_from_disk() (called by vault_reindex or the file
+        # watcher, when wired in).
+        self.sync_from_disk()
 
     def list(self, path: str) -> list[dict[str, Any]]:
         directory = self.resolve(path)
@@ -266,13 +269,62 @@ class Vault:
         return {"ok": True, "path": path, "deleted": True}
 
     def search(self, query: str, limit: int, mode: SearchMode) -> dict[str, Any]:
-        with self._lock:
-            if self._index_dirty:
-                self._index.rebuild(
-                    [IndexedNote(path=path, content=content) for path, content in self._markdown_files().items()]
-                )
-                self._index_dirty = False
         return self._index.search(query=query, limit=limit, mode=SearchMode(mode))
+
+    def sync_from_disk(self) -> dict[str, int]:
+        """Reconcile the index against the current contents of the vault.
+
+        Walks every .md file, upserts changed/new notes, deletes index entries
+        whose files are gone, and (if embeddings are enabled) backfills any
+        notes whose embedding is missing or stale.
+
+        Returns a small summary dict so callers can log the diff.
+        """
+        with self._lock:
+            on_disk: dict[str, str] = {}
+            for path in self.root.rglob("*.md"):
+                if not path.is_file() or self._is_ignored_path(path):
+                    continue
+                rel = self.relative(path)
+                on_disk[rel] = path.read_text(encoding="utf-8")
+
+            indexed = self._index.store.all_records()
+            added = modified = unchanged = removed = 0
+
+            from obsidian_mcp.search import _stored_note
+
+            for rel, content in on_disk.items():
+                note = IndexedNote(path=rel, content=content)
+                if rel not in indexed:
+                    self._index.upsert_note(note, embed=False)
+                    added += 1
+                    continue
+                # Skip the upsert entirely when content hasn't changed.
+                record = _stored_note(note)
+                if record.content_hash == indexed[rel].content_hash:
+                    unchanged += 1
+                else:
+                    self._index.upsert_note(note, embed=False)
+                    modified += 1
+
+            for rel in set(indexed) - set(on_disk):
+                self._index.delete_note(rel)
+                removed += 1
+
+            # Batch every newly-indexed/modified record into one embedding pass.
+            embedded = self._index.embed_pending()
+
+            log.info(
+                "sync_from_disk +%d ~%d -%d (unchanged=%d, embedded=%d)",
+                added, modified, removed, unchanged, embedded,
+            )
+            return {
+                "added": added,
+                "modified": modified,
+                "removed": removed,
+                "unchanged": unchanged,
+                "embedded": embedded,
+            }
 
     def backlinks(self, path: str) -> dict[str, Any]:
         target = self.resolve(path)
@@ -288,8 +340,10 @@ class Vault:
                 hits.append({"path": candidate, "links": matched})
         return {"path": self.relative(target), "backlinks": hits}
 
-    def invalidate_index(self) -> None:
-        self._index_dirty = True
+    def reindex(self) -> dict[str, int]:
+        """Force a full reconciliation against disk. Used by vault_reindex
+        when the user knows files changed out-of-band."""
+        return self.sync_from_disk()
 
     def resolve(self, path: str) -> Path:
         clean = _clean_relative_path(path)

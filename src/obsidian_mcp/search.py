@@ -13,7 +13,7 @@ from obsidian_mcp.constants import (
     SCORE_DECIMALS,
 )
 from obsidian_mcp.frontmatter import split_frontmatter
-from obsidian_mcp.store import FtsHit, SearchStore, StoredNote
+from obsidian_mcp.store import FtsHit, RecordMeta, SearchStore, StoredNote, VectorHit
 from obsidian_mcp.types import HitSource, SearchMode
 
 
@@ -29,54 +29,47 @@ class SearchIndex:
         self.store = SearchStore(database_path)
         self._openai_client: OpenAI | None = None
 
-    def _client(self) -> OpenAI:
-        if self._openai_client is None:
-            self._openai_client = OpenAI(
-                api_key=self.embeddings.api_key,
-                max_retries=OPENAI_MAX_RETRIES,
-                timeout=EMBEDDING_TIMEOUT_SECONDS,
-            )
-        return self._openai_client
+    # --- mutations ----------------------------------------------------------
 
-    def rebuild(self, notes: list[IndexedNote]) -> None:
-        records = [_stored_note(note) for note in notes]
-        self.store.replace_notes(records)
-        if self.embeddings.enabled:
-            self._embed_missing(records)
-
-    def upsert_note(self, note: IndexedNote) -> None:
+    def upsert_note(self, note: IndexedNote, *, embed: bool = True) -> None:
+        """Index a note. If `embed=False`, the embedding is deferred — the
+        caller is expected to flush via embed_pending() after batching many
+        upserts (so we make one OpenAI call instead of one per file)."""
         record = _stored_note(note)
-        self.store.upsert_note(record)
-        if self.embeddings.enabled:
-            self._embed_missing([record])
+        rowid = self.store.upsert_note(record)
+        if embed and self.embeddings.enabled:
+            self._embed_and_store([(rowid, record)])
 
     def delete_note(self, path: str) -> None:
         self.store.delete_note(path)
+
+    def embed_pending(self) -> int:
+        """Embed any indexed records that are missing or stale embeddings.
+        Returns the number of records embedded. No-op if embeddings disabled.
+        Used by startup sync to backfill after a batch of upserts."""
+        if not self.embeddings.enabled:
+            return 0
+        all_records = self.store.all_records()
+        pending: list[tuple[int, RecordMeta]] = []
+        for meta in all_records.values():
+            if self._meta_needs_embedding(meta):
+                pending.append((meta.rowid, meta))
+        if not pending:
+            return 0
+        # We need search_text + content_hash; pull them by re-reading via FTS.
+        # Caller-driven embedding (during sync) avoids this round-trip; this
+        # method is the safety net.
+        records_by_rowid = self._materialize_records(pending)
+        items = [(rowid, records_by_rowid[rowid]) for rowid, _ in pending if rowid in records_by_rowid]
+        return self._embed_and_store(items)
+
+    # --- search -------------------------------------------------------------
 
     def search(self, query: str, limit: int, mode: SearchMode) -> dict:
         mode = SearchMode(mode)
         if not query.strip():
             return {"hits": [], "warnings": []}
         return _SEARCH_DISPATCH[mode](self, query, limit)
-
-    def _search_fts(self, query: str, limit: int) -> list[dict]:
-        fts_query = _make_fts_query(query)
-        return [_fts_hit_to_dict(hit) for hit in self.store.search_fts(fts_query, limit)]
-
-    def _search_vectors(self, query: str, limit: int) -> list[dict]:
-        query_vector = self._embed_texts([query])[0]
-        ranked = [
-            {
-                "path": row.path,
-                "score": round(_dot(query_vector, row.vector), SCORE_DECIMALS),
-                "title": row.title,
-                "snippet": row.snippet,
-                "source": HitSource.VECTOR.value,
-            }
-            for row in self.store.stored_embeddings(self.embeddings.model, self.embeddings.dimensions)
-        ]
-        ranked.sort(key=lambda hit: hit["score"], reverse=True)
-        return ranked[:limit]
 
     def _bm25_only(self, query: str, limit: int) -> dict:
         return {"hits": self._search_fts(query, limit), "warnings": []}
@@ -95,17 +88,85 @@ class SearchIndex:
             return {"hits": fts_hits, "warnings": ["Hybrid search returned SQLite FTS5 results only."]}
         return {"hits": _fuse_hits(fts_hits, vector_hits, limit), "warnings": []}
 
-    def _embed_missing(self, records: list[StoredNote]) -> None:
-        existing = self.store.embedding_metadata(self.embeddings.model, self.embeddings.dimensions)
-        missing = [
-            record
-            for record in records
-            if record.path not in existing or existing[record.path].content_hash != record.content_hash
-        ]
-        for batch_start in range(0, len(missing), self.embeddings.batch_size):
-            batch = missing[batch_start : batch_start + self.embeddings.batch_size]
-            vectors = self._embed_texts([record.search_text for record in batch])
-            self.store.upsert_embeddings(batch, vectors, self.embeddings.model, self.embeddings.dimensions)
+    def _search_fts(self, query: str, limit: int) -> list[dict]:
+        fts_query = _make_fts_query(query)
+        return [_fts_hit_to_dict(hit) for hit in self.store.search_fts(fts_query, limit)]
+
+    def _search_vectors(self, query: str, limit: int) -> list[dict]:
+        query_vector = self._embed_texts([query])[0]
+        dim = len(query_vector)
+        hits = self.store.search_vectors(query_vector, limit, self.embeddings.model, dim)
+        return [_vector_hit_to_dict(hit) for hit in hits]
+
+    # --- embedding helpers --------------------------------------------------
+
+    def _needs_embedding(self, record: StoredNote) -> bool:
+        # The store's upsert_note clears embedded_* on content change, so we
+        # only need to embed when the new record has no embedding row.
+        return True  # caller already gated on enabled; let the store call decide
+
+    def _meta_needs_embedding(self, meta: RecordMeta) -> bool:
+        if meta.embedded_hash != meta.content_hash:
+            return True
+        if meta.embedded_model != self.embeddings.model:
+            return True
+        return False
+
+    def _embed_and_store(self, items: list[tuple[int, StoredNote]]) -> int:
+        """items: list of (rowid, StoredNote). Embeds in batches and writes
+        into vec_notes + note_meta. Returns the number of records embedded."""
+        total = 0
+        for batch_start in range(0, len(items), self.embeddings.batch_size):
+            batch = items[batch_start : batch_start + self.embeddings.batch_size]
+            vectors = self._embed_texts([record.search_text for _, record in batch])
+            dim = len(vectors[0]) if vectors else 0
+            self.store.upsert_embeddings(
+                ((rowid, record.content_hash, vector) for (rowid, record), vector in zip(batch, vectors, strict=True)),
+                self.embeddings.model,
+                dim,
+            )
+            total += len(batch)
+        return total
+
+    def _materialize_records(self, pending: list[tuple[int, RecordMeta]]) -> dict[int, StoredNote]:
+        """For records flagged as needing embedding by the meta table alone,
+        rehydrate the StoredNote from the FTS row so we have search_text."""
+        rowids = [rowid for rowid, _ in pending]
+        if not rowids:
+            return {}
+        placeholders = ",".join("?" for _ in rowids)
+        with self.store.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT n.rowid AS rowid, n.path, n.title, n.frontmatter,
+                       n.body, n.tags, m.content_hash
+                FROM notes n JOIN note_meta m ON m.rowid = n.rowid
+                WHERE n.rowid IN ({placeholders})
+                """,
+                rowids,
+            ).fetchall()
+        out: dict[int, StoredNote] = {}
+        for row in rows:
+            search_text = f"{row['title']}\n{row['frontmatter']}\n{row['tags']}\n{row['body']}"
+            out[row["rowid"]] = StoredNote(
+                path=row["path"],
+                title=row["title"],
+                frontmatter_json=row["frontmatter"],
+                body=row["body"],
+                tags_text=row["tags"],
+                search_text=search_text,
+                content_hash=row["content_hash"],
+            )
+        return out
+
+    def _client(self) -> OpenAI:
+        if self._openai_client is None:
+            self._openai_client = OpenAI(
+                api_key=self.embeddings.api_key,
+                max_retries=OPENAI_MAX_RETRIES,
+                timeout=EMBEDDING_TIMEOUT_SECONDS,
+            )
+        return self._openai_client
 
     def _embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -171,8 +232,16 @@ def _fts_hit_to_dict(hit: FtsHit) -> dict:
     }
 
 
-def _dot(left: list[float], right: list[float]) -> float:
-    return sum(a * b for a, b in zip(left, right, strict=True))
+def _vector_hit_to_dict(hit: VectorHit) -> dict:
+    # cosine distance ∈ [0, 2]; flip to a similarity score ∈ [-1, 1] so
+    # higher is better and the result shape matches FTS hits semantically.
+    return {
+        "path": hit.path,
+        "score": round(1.0 - hit.distance, SCORE_DECIMALS),
+        "title": hit.title,
+        "snippet": hit.snippet,
+        "source": HitSource.VECTOR.value,
+    }
 
 
 def _fuse_hits(fts_hits: list[dict], vector_hits: list[dict], limit: int) -> list[dict]:

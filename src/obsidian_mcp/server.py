@@ -214,9 +214,9 @@ def _register_tools(mcp: FastMCP, runtime: Runtime) -> None:
 
     @mcp.tool()
     def vault_reindex() -> dict[str, Any]:
-        """Mark the search index dirty; the next search rebuilds from disk."""
-        runtime.vault.invalidate_index()
-        return {"ok": True}
+        """Re-scan the vault from disk and bring the index up to date.
+        Returns a diff summary (added / modified / removed / unchanged / embedded)."""
+        return {"ok": True, **runtime.vault.reindex()}
 
 
 def main() -> None:
