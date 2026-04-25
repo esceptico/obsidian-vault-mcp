@@ -17,6 +17,9 @@ from obsidian_mcp.frontmatter import (
 from obsidian_mcp.logging import get_logger
 from obsidian_mcp.obsidian import block_ids, inline_tags, markdown_links, rewrite_wikilink_targets, wikilinks
 from obsidian_mcp.search import IndexedNote, SearchIndex
+from obsidian_mcp.types import DeleteStrategy, EntryKind, SearchMode
+
+from obsidian_mcp.constants import MAX_FRONTMATTER_DEPTH, MAX_NOTE_BYTES, TRASH_TIMESTAMP_FORMAT
 
 log = get_logger("vault")
 
@@ -24,7 +27,7 @@ log = get_logger("vault")
 @dataclass(frozen=True)
 class VaultEntry:
     path: str
-    kind: str
+    kind: EntryKind
     size: int
     modified_at: str
 
@@ -41,7 +44,7 @@ class Vault:
         self._index_dirty = self._index.store.count_notes() == 0
         self._lock = threading.RLock()
 
-    def list(self, path: str = "") -> list[dict[str, Any]]:
+    def list(self, path: str) -> list[dict[str, Any]]:
         directory = self.resolve(path)
         if not directory.is_dir():
             raise ValueError(f"Not a directory: {path}")
@@ -50,13 +53,14 @@ class Vault:
             if self._is_ignored_path(child):
                 continue
             stat = child.stat()
+            kind = EntryKind.DIRECTORY if child.is_dir() else EntryKind.FILE
             entries.append(
-                VaultEntry(
-                    path=self.relative(child),
-                    kind="directory" if child.is_dir() else "file",
-                    size=stat.st_size,
-                    modified_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
-                ).__dict__
+                {
+                    "path": self.relative(child),
+                    "kind": kind.value,
+                    "size": stat.st_size,
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                }
             )
         return entries
 
@@ -80,10 +84,12 @@ class Vault:
     def create_note(
         self,
         path: str,
-        content: str = "",
-        frontmatter: dict[str, Any] | None = None,
-        overwrite: bool = False,
+        content: str,
+        frontmatter: dict[str, Any] | None,
+        overwrite: bool,
     ) -> dict[str, Any]:
+        _check_size(content)
+        _check_frontmatter_depth(frontmatter or {})
         with self._lock:
             note_path = self.resolve_for_write(_ensure_md(path))
             if note_path.exists() and not overwrite:
@@ -99,9 +105,13 @@ class Vault:
     def update_note(
         self,
         path: str,
-        content: str | None = None,
-        frontmatter_patch: dict[str, Any] | None = None,
+        content: str | None,
+        frontmatter_patch: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        if content is not None:
+            _check_size(content)
+        if frontmatter_patch:
+            _check_frontmatter_depth(frontmatter_patch)
         with self._lock:
             note_path = self.resolve(path)
             if not note_path.is_file():
@@ -127,7 +137,7 @@ class Vault:
                 "previous_body": body,
             }
 
-    def move_path(self, source: str, destination: str, rewrite_links: bool = True, overwrite: bool = False) -> dict[str, Any]:
+    def move_path(self, source: str, destination: str, rewrite_links: bool, overwrite: bool) -> dict[str, Any]:
         with self._lock:
             return self._move_path_locked(source, destination, rewrite_links, overwrite)
 
@@ -205,63 +215,69 @@ class Vault:
             "rewritten_files": len(pending_rewrites),
         }
 
-    def delete_path(self, path: str, recursive: bool = False, strategy: str = "trash") -> dict[str, Any]:
+    def delete_path(self, path: str, recursive: bool, strategy: DeleteStrategy) -> dict[str, Any]:
+        strategy = DeleteStrategy(strategy)
         with self._lock:
-            target = self.resolve(path)
-            if target == self.root:
-                raise ValueError("Refusing to delete the vault root")
-            if self._is_ignored_path(target):
-                raise ValueError(f"Refusing to delete reserved path: {path}")
-            if not target.exists():
-                raise FileNotFoundError(path)
-
-            if target.is_dir():
-                visible = [c for c in target.iterdir() if not self._is_ignored_path(c)]
-                if visible and not recursive:
-                    raise ValueError("Directory is not empty; pass recursive=True")
-
-            log.info("delete_path path=%s strategy=%s recursive=%s", path, strategy, recursive)
-
-            affected_md: list[str] = []
-            if target.is_file() and target.suffix == ".md":
-                affected_md = [self.relative(target)]
-            elif target.is_dir():
-                affected_md = [
-                    self.relative(p)
-                    for p in target.rglob("*.md")
-                    if p.is_file() and not self._is_ignored_path(p)
-                ]
-
-            if strategy == "trash":
-                trash = self.resolve_for_write(self.settings.trash_path)
-                trash.mkdir(parents=True, exist_ok=True)
-                destination = self._unique_trash_destination(trash, target.name)
-                shutil.move(str(target), str(destination))
-                result = {"ok": True, "path": path, "trashed_to": self.relative(destination)}
-            elif strategy == "delete":
-                if target.is_dir():
-                    shutil.rmtree(target)
-                else:
-                    target.unlink()
-                result = {"ok": True, "path": path, "deleted": True}
-            else:
-                raise ValueError("strategy must be 'trash' or 'delete'")
-
+            target = self._validated_delete_target(path, recursive)
+            log.info("delete_path path=%s strategy=%s recursive=%s", path, strategy.value, recursive)
+            affected_md = self._affected_markdown_paths(target)
+            result = _DELETE_DISPATCH[strategy](self, path, target)
             for md in affected_md:
                 self._index.delete_note(md)
             return result
 
-    def search(self, query: str, limit: int = 10, mode: str = "hybrid") -> dict[str, Any]:
+    def _validated_delete_target(self, path: str, recursive: bool) -> Path:
+        target = self.resolve(path)
+        if target == self.root:
+            raise ValueError("Refusing to delete the vault root")
+        if self._is_ignored_path(target):
+            raise ValueError(f"Refusing to delete reserved path: {path}")
+        if not target.exists():
+            raise FileNotFoundError(path)
+        if target.is_dir():
+            visible = [c for c in target.iterdir() if not self._is_ignored_path(c)]
+            if visible and not recursive:
+                raise ValueError("Directory is not empty; pass recursive=True")
+        return target
+
+    def _affected_markdown_paths(self, target: Path) -> list[str]:
+        if target.is_file() and target.suffix == ".md":
+            return [self.relative(target)]
+        if target.is_dir():
+            return [
+                self.relative(p)
+                for p in target.rglob("*.md")
+                if p.is_file() and not self._is_ignored_path(p)
+            ]
+        return []
+
+    def _delete_to_trash(self, path: str, target: Path) -> dict[str, Any]:
+        trash = self.resolve_for_write(self.settings.trash_path)
+        trash.mkdir(parents=True, exist_ok=True)
+        destination = self._unique_trash_destination(trash, target.name)
+        shutil.move(str(target), str(destination))
+        return {"ok": True, "path": path, "trashed_to": self.relative(destination)}
+
+    def _delete_permanently(self, path: str, target: Path) -> dict[str, Any]:
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+        return {"ok": True, "path": path, "deleted": True}
+
+    def search(self, query: str, limit: int, mode: SearchMode) -> dict[str, Any]:
         with self._lock:
             if self._index_dirty:
                 self._index.rebuild(
                     [IndexedNote(path=path, content=content) for path, content in self._markdown_files().items()]
                 )
                 self._index_dirty = False
-        return self._index.search(query=query, limit=limit, mode=mode)  # type: ignore[arg-type]
+        return self._index.search(query=query, limit=limit, mode=SearchMode(mode))
 
     def backlinks(self, path: str) -> dict[str, Any]:
         target = self.resolve(path)
+        if not target.exists():
+            raise FileNotFoundError(path)
         names = self._link_names_for(target)
         hits = []
         for candidate, content in self._markdown_files().items():
@@ -301,7 +317,7 @@ class Vault:
             return path.relative_to(self.root).as_posix()
 
     def _unique_trash_destination(self, trash_dir: Path, target_name: str) -> Path:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(timezone.utc).strftime(TRASH_TIMESTAMP_FORMAT)
         base = trash_dir / f"{timestamp}-{target_name}"
         candidate = base
         suffix = 1
@@ -380,3 +396,25 @@ def _frontmatter_tags(frontmatter: dict[str, Any]) -> list[str]:
     if isinstance(tags, list):
         return [str(tag).lstrip("#") for tag in tags]
     return []
+
+
+def _check_size(content: str) -> None:
+    if len(content.encode("utf-8")) > MAX_NOTE_BYTES:
+        raise ValueError(f"Note content exceeds {MAX_NOTE_BYTES} bytes")
+
+
+def _check_frontmatter_depth(value: Any, depth: int = 0) -> None:
+    if depth > MAX_FRONTMATTER_DEPTH:
+        raise ValueError(f"Frontmatter exceeds max depth ({MAX_FRONTMATTER_DEPTH})")
+    if isinstance(value, dict):
+        for v in value.values():
+            _check_frontmatter_depth(v, depth + 1)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            _check_frontmatter_depth(v, depth + 1)
+
+
+_DELETE_DISPATCH = {
+    DeleteStrategy.TRASH: Vault._delete_to_trash,
+    DeleteStrategy.DELETE: Vault._delete_permanently,
+}

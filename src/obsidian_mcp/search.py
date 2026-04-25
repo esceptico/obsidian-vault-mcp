@@ -2,13 +2,19 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from openai import OpenAI
 
 from obsidian_mcp.config import EmbeddingSettings
+from obsidian_mcp.constants import (
+    EMBEDDING_TIMEOUT_SECONDS,
+    OPENAI_MAX_RETRIES,
+    RRF_K,
+    SCORE_DECIMALS,
+)
 from obsidian_mcp.frontmatter import split_frontmatter
 from obsidian_mcp.store import FtsHit, SearchStore, StoredNote
+from obsidian_mcp.types import HitSource, SearchMode
 
 
 @dataclass(frozen=True)
@@ -27,8 +33,8 @@ class SearchIndex:
         if self._openai_client is None:
             self._openai_client = OpenAI(
                 api_key=self.embeddings.api_key,
-                max_retries=3,
-                timeout=30.0,
+                max_retries=OPENAI_MAX_RETRIES,
+                timeout=EMBEDDING_TIMEOUT_SECONDS,
             )
         return self._openai_client
 
@@ -47,33 +53,11 @@ class SearchIndex:
     def delete_note(self, path: str) -> None:
         self.store.delete_note(path)
 
-    def search(
-        self,
-        query: str,
-        limit: int = 10,
-        mode: Literal["bm25", "hybrid", "vector"] = "hybrid",
-    ) -> dict:
-        if mode not in {"bm25", "hybrid", "vector"}:
-            raise ValueError("mode must be 'bm25', 'hybrid', or 'vector'")
+    def search(self, query: str, limit: int, mode: SearchMode) -> dict:
+        mode = SearchMode(mode)
         if not query.strip():
             return {"hits": [], "warnings": []}
-
-        warnings = []
-        fts_hits = [] if mode == "vector" else self._search_fts(query, limit)
-        vector_hits = []
-        if mode in {"hybrid", "vector"}:
-            if self.embeddings.enabled:
-                vector_hits = self._search_vectors(query, limit)
-            else:
-                warnings.append("Vector search is disabled; set OPENAI_API_KEY to enable embeddings.")
-
-        if mode == "vector":
-            return {"hits": vector_hits, "warnings": warnings}
-        if mode == "hybrid" and vector_hits:
-            return {"hits": _fuse_hits(fts_hits, vector_hits, limit), "warnings": warnings}
-        if mode == "hybrid":
-            warnings.append("Hybrid search returned SQLite FTS5 results only.")
-        return {"hits": fts_hits, "warnings": warnings}
+        return _SEARCH_DISPATCH[mode](self, query, limit)
 
     def _search_fts(self, query: str, limit: int) -> list[dict]:
         fts_query = _make_fts_query(query)
@@ -81,19 +65,35 @@ class SearchIndex:
 
     def _search_vectors(self, query: str, limit: int) -> list[dict]:
         query_vector = self._embed_texts([query])[0]
-        ranked = []
-        for row in self.store.stored_embeddings(self.embeddings.model, self.embeddings.dimensions):
-            ranked.append(
-                {
-                    "path": row.path,
-                    "score": round(_dot(query_vector, row.vector), 6),
-                    "title": row.title,
-                    "snippet": row.snippet,
-                    "source": "vector",
-                }
-            )
+        ranked = [
+            {
+                "path": row.path,
+                "score": round(_dot(query_vector, row.vector), SCORE_DECIMALS),
+                "title": row.title,
+                "snippet": row.snippet,
+                "source": HitSource.VECTOR.value,
+            }
+            for row in self.store.stored_embeddings(self.embeddings.model, self.embeddings.dimensions)
+        ]
         ranked.sort(key=lambda hit: hit["score"], reverse=True)
         return ranked[:limit]
+
+    def _bm25_only(self, query: str, limit: int) -> dict:
+        return {"hits": self._search_fts(query, limit), "warnings": []}
+
+    def _vector_only(self, query: str, limit: int) -> dict:
+        if not self.embeddings.enabled:
+            return {"hits": [], "warnings": [_VECTOR_DISABLED_WARNING]}
+        return {"hits": self._search_vectors(query, limit), "warnings": []}
+
+    def _hybrid(self, query: str, limit: int) -> dict:
+        fts_hits = self._search_fts(query, limit)
+        if not self.embeddings.enabled:
+            return {"hits": fts_hits, "warnings": [_VECTOR_DISABLED_WARNING]}
+        vector_hits = self._search_vectors(query, limit)
+        if not vector_hits:
+            return {"hits": fts_hits, "warnings": ["Hybrid search returned SQLite FTS5 results only."]}
+        return {"hits": _fuse_hits(fts_hits, vector_hits, limit), "warnings": []}
 
     def _embed_missing(self, records: list[StoredNote]) -> None:
         existing = self.store.embedding_metadata(self.embeddings.model, self.embeddings.dimensions)
@@ -119,6 +119,15 @@ class SearchIndex:
             request["dimensions"] = self.embeddings.dimensions
         response = self._client().embeddings.create(**request)
         return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+
+
+_VECTOR_DISABLED_WARNING = "Vector search is disabled; set OPENAI_API_KEY to enable embeddings."
+
+_SEARCH_DISPATCH = {
+    SearchMode.BM25: SearchIndex._bm25_only,
+    SearchMode.VECTOR: SearchIndex._vector_only,
+    SearchMode.HYBRID: SearchIndex._hybrid,
+}
 
 
 def _stored_note(note: IndexedNote) -> StoredNote:
@@ -155,10 +164,10 @@ def _frontmatter_tags(frontmatter: dict) -> list[str]:
 def _fts_hit_to_dict(hit: FtsHit) -> dict:
     return {
         "path": hit.path,
-        "score": round(hit.score, 6),
+        "score": round(hit.score, SCORE_DECIMALS),
         "title": hit.title,
         "snippet": hit.snippet,
-        "source": "fts",
+        "source": HitSource.FTS.value,
     }
 
 
@@ -172,14 +181,14 @@ def _fuse_hits(fts_hits: list[dict], vector_hits: list[dict], limit: int) -> lis
     for hits in (fts_hits, vector_hits):
         for rank, hit in enumerate(hits, start=1):
             path = hit["path"]
-            scores[path] = scores.get(path, 0.0) + 1 / (60 + rank)
+            scores[path] = scores.get(path, 0.0) + 1 / (RRF_K + rank)
             by_path.setdefault(path, hit.copy())
 
     fused = []
     for path, score in scores.items():
         hit = by_path[path]
-        hit["score"] = round(score, 6)
-        hit["source"] = "hybrid"
+        hit["score"] = round(score, SCORE_DECIMALS)
+        hit["source"] = HitSource.HYBRID.value
         fused.append(hit)
     fused.sort(key=lambda hit: hit["score"], reverse=True)
     return fused[:limit]

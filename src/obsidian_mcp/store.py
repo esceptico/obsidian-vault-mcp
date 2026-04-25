@@ -3,6 +3,13 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from obsidian_mcp.constants import FTS_SNIPPET_LENGTH
+
+_SNIPPET_TARGET_COLUMN = 3  # 0-indexed: path, title, frontmatter, body
+_SNIPPET_OPEN = "["
+_SNIPPET_CLOSE = "]"
+_SNIPPET_ELLIPSIS = " ... "
+
 
 PRAGMA_JOURNAL_MODE = "PRAGMA journal_mode=WAL"
 PRAGMA_SYNCHRONOUS = "PRAGMA synchronous=NORMAL"
@@ -35,20 +42,25 @@ INSERT INTO notes(path, title, frontmatter, body, tags)
 VALUES (?, ?, ?, ?, ?)
 """
 
-SEARCH_FTS = """
+_SNIPPET_EXPR = (
+    f"snippet(notes, {_SNIPPET_TARGET_COLUMN}, "
+    f"'{_SNIPPET_OPEN}', '{_SNIPPET_CLOSE}', '{_SNIPPET_ELLIPSIS}', {FTS_SNIPPET_LENGTH})"
+)
+
+SEARCH_FTS = f"""
 SELECT
     path,
     title,
     bm25(notes) AS score,
-    snippet(notes, 3, '[', ']', ' ... ', 32) AS snippet
+    {_SNIPPET_EXPR} AS snippet
 FROM notes
 WHERE notes MATCH ?
 ORDER BY score
 LIMIT ?
 """
 
-SELECT_EMBEDDINGS_FOR_SEARCH = """
-SELECT e.path, e.vector, n.title, snippet(notes, 3, '[', ']', ' ... ', 32) AS snippet
+SELECT_EMBEDDINGS_FOR_SEARCH = f"""
+SELECT e.path, e.vector, n.title, {_SNIPPET_EXPR} AS snippet
 FROM note_embeddings e
 JOIN notes n ON n.path = e.path
 WHERE e.model = ? AND (e.dimensions IS ? OR e.dimensions = ?)

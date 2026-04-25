@@ -4,6 +4,7 @@ from pathlib import Path
 
 from obsidian_mcp.config import VaultSettings
 from obsidian_mcp.frontmatter import patch_frontmatter, split_frontmatter
+from obsidian_mcp.types import DeleteStrategy, SearchMode
 from obsidian_mcp.vault import Vault
 
 
@@ -22,8 +23,27 @@ class FrontmatterTests(unittest.TestCase):
 class VaultTests(unittest.TestCase):
     def make_vault(self) -> tuple[tempfile.TemporaryDirectory[str], Vault]:
         tmp = tempfile.TemporaryDirectory()
-        vault = Vault(VaultSettings(root=Path(tmp.name)))
+        vault = Vault(VaultSettings(root=Path(tmp.name)), embeddings=None)
         return tmp, vault
+
+    # ----- helpers so the tests stay readable without piling on defaults -----
+
+    def _create(self, vault: Vault, path: str, content: str = "", frontmatter=None) -> dict:
+        return vault.create_note(path, content, frontmatter, overwrite=False)
+
+    def _trash(self, vault: Vault, path: str) -> dict:
+        return vault.delete_path(path, recursive=False, strategy=DeleteStrategy.TRASH)
+
+    def _list(self, vault: Vault, path: str = "") -> list[dict]:
+        return vault.list(path)
+
+    def _bm25(self, vault: Vault, query: str) -> dict:
+        return vault.search(query, limit=10, mode=SearchMode.BM25)
+
+    def _move(self, vault: Vault, src: str, dst: str, *, rewrite_links: bool = True) -> dict:
+        return vault.move_path(src, dst, rewrite_links=rewrite_links, overwrite=False)
+
+    # --------------------------------- tests ---------------------------------
 
     def test_rejects_path_traversal(self) -> None:
         tmp, vault = self.make_vault()
@@ -34,27 +54,27 @@ class VaultTests(unittest.TestCase):
     def test_create_read_search(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("Projects/Alpha", "This note discusses semantic search.", {"tags": ["ai"]})
+            self._create(vault, "Projects/Alpha", "This note discusses semantic search.", {"tags": ["ai"]})
 
             note = vault.read("Projects/Alpha.md")
             self.assertEqual(note["frontmatter"]["tags"], ["ai"])
             self.assertIn("semantic", note["body"])
 
-            results = vault.search("semantic search", mode="bm25")
+            results = self._bm25(vault, "semantic search")
             self.assertEqual(results["hits"][0]["path"], "Projects/Alpha.md")
             self.assertTrue((Path(tmp.name) / ".obsidian-mcp" / "index.sqlite").exists())
-            self.assertNotIn(".obsidian-mcp", {entry["path"] for entry in vault.list()})
+            self.assertNotIn(".obsidian-mcp", {entry["path"] for entry in self._list(vault)})
 
             with self.assertRaises(ValueError):
-                vault.create_note(".obsidian-mcp/manual", "nope")
+                self._create(vault, ".obsidian-mcp/manual", "nope")
 
     def test_rename_rewrites_wikilinks(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("Old Note", "Body")
-            vault.create_note("Ref", "See [[Old Note|alias]] and [[Old Note#Heading]].")
+            self._create(vault, "Old Note", "Body")
+            self._create(vault, "Ref", "See [[Old Note|alias]] and [[Old Note#Heading]].")
 
-            result = vault.move_path("Old Note.md", "New Note.md", rewrite_links=True)
+            result = self._move(vault, "Old Note.md", "New Note.md")
             ref = vault.read("Ref.md")
 
             self.assertEqual(result["rewritten_files"], 1)
@@ -67,7 +87,7 @@ class VaultTests(unittest.TestCase):
             nested = Path(tmp.name) / "Projects" / ".trash" / "note.md"
             nested.parent.mkdir(parents=True)
             nested.write_text("hello", encoding="utf-8")
-            listed = vault.list("Projects/.trash")
+            listed = self._list(vault, "Projects/.trash")
             self.assertEqual(len(listed), 1)
             self.assertEqual(listed[0]["path"], "Projects/.trash/note.md")
 
@@ -76,14 +96,14 @@ class VaultTests(unittest.TestCase):
         with tmp:
             (Path(tmp.name) / ".trash").mkdir()
             (Path(tmp.name) / ".trash" / "x.md").write_text("x", encoding="utf-8")
-            self.assertNotIn(".trash", {entry["path"] for entry in vault.list()})
+            self.assertNotIn(".trash", {entry["path"] for entry in self._list(vault)})
 
     def test_delete_refuses_obsidian_mcp(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("Note", "x")
+            self._create(vault, "Note", "x")
             with self.assertRaises(ValueError):
-                vault.delete_path(".obsidian-mcp", recursive=True, strategy="delete")
+                vault.delete_path(".obsidian-mcp", recursive=True, strategy=DeleteStrategy.DELETE)
 
     def test_trash_does_not_overwrite_same_second(self) -> None:
         from datetime import datetime, timezone
@@ -91,25 +111,40 @@ class VaultTests(unittest.TestCase):
 
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("A", "first")
+            self._create(vault, "A", "first")
             fixed = datetime(2026, 4, 25, 12, 0, 0, tzinfo=timezone.utc)
 
             class FrozenDateTime:
                 @classmethod
                 def now(cls, tz=None):
                     return fixed
+
                 @staticmethod
                 def fromtimestamp(ts, tz=None):
                     return datetime.fromtimestamp(ts, tz)
 
             with patch("obsidian_mcp.vault.datetime", FrozenDateTime):
-                r1 = vault.delete_path("A.md", strategy="trash")
-                vault.create_note("A", "second")
-                r2 = vault.delete_path("A.md", strategy="trash")
+                r1 = self._trash(vault, "A.md")
+                self._create(vault, "A", "second")
+                r2 = self._trash(vault, "A.md")
 
             self.assertNotEqual(r1["trashed_to"], r2["trashed_to"])
             trash_dir = Path(tmp.name) / ".trash"
             self.assertEqual(len(list(trash_dir.iterdir())), 2)
+
+    def test_backlinks_missing_path_raises(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            with self.assertRaises(FileNotFoundError):
+                vault.backlinks("does-not-exist.md")
+
+    def test_create_note_rejects_oversized_content(self) -> None:
+        from obsidian_mcp.constants import MAX_NOTE_BYTES
+
+        tmp, vault = self.make_vault()
+        with tmp:
+            with self.assertRaises(ValueError):
+                self._create(vault, "Big", "x" * (MAX_NOTE_BYTES + 1))
 
     def test_concurrent_searches_only_rebuild_once(self) -> None:
         import threading
@@ -117,7 +152,7 @@ class VaultTests(unittest.TestCase):
         tmp, vault = self.make_vault()
         with tmp:
             for i in range(5):
-                vault.create_note(f"N{i}", f"hello {i}")
+                self._create(vault, f"N{i}", f"hello {i}")
             rebuild_calls = {"n": 0}
             original = vault._index.rebuild
 
@@ -129,7 +164,7 @@ class VaultTests(unittest.TestCase):
             vault.invalidate_index()
 
             threads = [
-                threading.Thread(target=lambda: vault.search("hello", mode="bm25"))
+                threading.Thread(target=lambda: self._bm25(vault, "hello"))
                 for _ in range(8)
             ]
             for t in threads:
@@ -153,7 +188,7 @@ class VaultTests(unittest.TestCase):
                 return real_fsync(fd)
 
             with patch("obsidian_mcp.vault.os.fsync", side_effect=spy_fsync):
-                vault.create_note("Note", "hello")
+                self._create(vault, "Note", "hello")
 
             self.assertGreaterEqual(called.get("count", 0), 1)
 
@@ -165,10 +200,10 @@ class VaultTests(unittest.TestCase):
     def test_rename_preserves_folder_qualifier_on_collision(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("Projects/Old", "Body")
-            vault.create_note("Archive/New", "Other body")
-            vault.create_note("Ref", "See [[Projects/Old]] and [[Archive/New]].")
-            result = vault.move_path("Projects/Old.md", "Projects/New.md")
+            self._create(vault, "Projects/Old", "Body")
+            self._create(vault, "Archive/New", "Other body")
+            self._create(vault, "Ref", "See [[Projects/Old]] and [[Archive/New]].")
+            result = self._move(vault, "Projects/Old.md", "Projects/New.md")
             ref = vault.read("Ref.md")
 
             self.assertEqual(result["rewritten_files"], 1)
@@ -178,9 +213,9 @@ class VaultTests(unittest.TestCase):
     def test_rename_preserves_folder_qualifier_when_source_was_qualified(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("Projects/Old", "Body")
-            vault.create_note("Ref", "See [[Projects/Old]].")
-            vault.move_path("Projects/Old.md", "Projects/Renamed.md")
+            self._create(vault, "Projects/Old", "Body")
+            self._create(vault, "Ref", "See [[Projects/Old]].")
+            self._move(vault, "Projects/Old.md", "Projects/Renamed.md")
             ref = vault.read("Ref.md")
             self.assertIn("[[Projects/Renamed]]", ref["content"])
 
@@ -189,11 +224,11 @@ class VaultTests(unittest.TestCase):
 
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("Old", "body")
-            vault.create_note("Ref", "[[Old]]")
+            self._create(vault, "Old", "body")
+            self._create(vault, "Ref", "[[Old]]")
             with patch.object(vault, "_atomic_write", side_effect=OSError("disk full")):
                 with self.assertRaises(OSError):
-                    vault.move_path("Old.md", "New.md")
+                    self._move(vault, "Old.md", "New.md")
             self.assertTrue((Path(tmp.name) / "Old.md").exists())
             self.assertFalse((Path(tmp.name) / "New.md").exists())
             ref_text = (Path(tmp.name) / "Ref.md").read_text(encoding="utf-8")
@@ -202,14 +237,13 @@ class VaultTests(unittest.TestCase):
     def test_folder_qualified_wikilinks_are_matched(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            vault.create_note("Projects/Old Note", "Body")
-            vault.create_note("Ref", "See [[Projects/Old Note]].")
+            self._create(vault, "Projects/Old Note", "Body")
+            self._create(vault, "Ref", "See [[Projects/Old Note]].")
 
-            result = vault.move_path("Projects/Old Note.md", "Projects/New Note.md", rewrite_links=True)
+            result = self._move(vault, "Projects/Old Note.md", "Projects/New Note.md")
             ref = vault.read("Ref.md")
 
             self.assertEqual(result["rewritten_files"], 1)
-            # Folder qualifier is preserved because the source link was qualified.
             self.assertIn("[[Projects/New Note]]", ref["content"])
 
 

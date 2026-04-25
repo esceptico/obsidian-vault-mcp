@@ -5,6 +5,9 @@ from unittest.mock import patch
 
 from obsidian_mcp.config import EmbeddingSettings
 from obsidian_mcp.search import IndexedNote, SearchIndex
+from obsidian_mcp.types import SearchMode
+
+DEFAULT_LIMIT = 10
 
 
 class SearchTests(unittest.TestCase):
@@ -33,8 +36,8 @@ class SearchTests(unittest.TestCase):
                         IndexedNote(path="Food.md", content="recipe notes"),
                     ]
                 )
-                vector = index.search("semantic question", mode="vector")
-                hybrid = index.search("semantic question", mode="hybrid")
+                vector = index.search("semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR)
+                hybrid = index.search("semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.HYBRID)
 
         self.assertEqual(vector["hits"][0]["path"], "AI.md")
         self.assertEqual(vector["hits"][0]["source"], "vector")
@@ -57,8 +60,8 @@ class SearchTests(unittest.TestCase):
             index = SearchIndex(Path(tmp) / "i.sqlite", EmbeddingSettings())
             index.rebuild([IndexedNote(path="A.md", content="alpha")])
             index.upsert_note(IndexedNote(path="B.md", content="beta"))
-            beta_hits = [hit["path"] for hit in index.search("beta", mode="bm25")["hits"]]
-            alpha_hits = [hit["path"] for hit in index.search("alpha", mode="bm25")["hits"]]
+            beta_hits = [hit["path"] for hit in index.search("beta", limit=DEFAULT_LIMIT, mode=SearchMode.BM25)["hits"]]
+            alpha_hits = [hit["path"] for hit in index.search("alpha", limit=DEFAULT_LIMIT, mode=SearchMode.BM25)["hits"]]
             self.assertIn("B.md", beta_hits)
             self.assertIn("A.md", alpha_hits)
 
