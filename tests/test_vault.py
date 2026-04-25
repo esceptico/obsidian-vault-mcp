@@ -1,0 +1,78 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from obsidian_mcp.config import VaultSettings
+from obsidian_mcp.frontmatter import patch_frontmatter, split_frontmatter
+from obsidian_mcp.vault import Vault
+
+
+class FrontmatterTests(unittest.TestCase):
+    def test_frontmatter_round_trip_patch(self) -> None:
+        content = "---\ntags:\n- project\nstatus: old\n---\nBody"
+        updated = patch_frontmatter(content, {"status": "active", "owner": "me"})
+        frontmatter, body = split_frontmatter(updated)
+
+        self.assertEqual(frontmatter["tags"], ["project"])
+        self.assertEqual(frontmatter["status"], "active")
+        self.assertEqual(frontmatter["owner"], "me")
+        self.assertEqual(body, "Body")
+
+
+class VaultTests(unittest.TestCase):
+    def make_vault(self) -> tuple[tempfile.TemporaryDirectory[str], Vault]:
+        tmp = tempfile.TemporaryDirectory()
+        vault = Vault(VaultSettings(root=Path(tmp.name)))
+        return tmp, vault
+
+    def test_rejects_path_traversal(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            with self.assertRaises(ValueError):
+                vault.read("../outside.md")
+
+    def test_create_read_search(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("Projects/Alpha", "This note discusses semantic search.", {"tags": ["ai"]})
+
+            note = vault.read("Projects/Alpha.md")
+            self.assertEqual(note["frontmatter"]["tags"], ["ai"])
+            self.assertIn("semantic", note["body"])
+
+            results = vault.search("semantic search", mode="bm25")
+            self.assertEqual(results["hits"][0]["path"], "Projects/Alpha.md")
+            self.assertTrue((Path(tmp.name) / ".obsidian-mcp" / "index.sqlite").exists())
+            self.assertNotIn(".obsidian-mcp", {entry["path"] for entry in vault.list()})
+
+            with self.assertRaises(ValueError):
+                vault.create_note(".obsidian-mcp/manual", "nope")
+
+    def test_rename_rewrites_wikilinks(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("Old Note", "Body")
+            vault.create_note("Ref", "See [[Old Note|alias]] and [[Old Note#Heading]].")
+
+            result = vault.move_path("Old Note.md", "New Note.md", rewrite_links=True)
+            ref = vault.read("Ref.md")
+
+            self.assertEqual(result["rewritten_files"], 1)
+            self.assertIn("[[New Note|alias]]", ref["content"])
+            self.assertIn("[[New Note#Heading]]", ref["content"])
+
+    def test_folder_qualified_wikilinks_are_matched(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            vault.create_note("Projects/Old Note", "Body")
+            vault.create_note("Ref", "See [[Projects/Old Note]].")
+
+            result = vault.move_path("Projects/Old Note.md", "Projects/New Note.md", rewrite_links=True)
+            ref = vault.read("Ref.md")
+
+            self.assertEqual(result["rewritten_files"], 1)
+            self.assertIn("[[New Note]]", ref["content"])
+
+
+if __name__ == "__main__":
+    unittest.main()

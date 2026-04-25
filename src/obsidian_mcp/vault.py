@@ -1,0 +1,265 @@
+import os
+import shutil
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from obsidian_mcp.config import EmbeddingSettings, VaultSettings
+from obsidian_mcp.frontmatter import patch_frontmatter, render_frontmatter, split_frontmatter
+from obsidian_mcp.obsidian import block_ids, inline_tags, markdown_links, rewrite_wikilink_targets, wikilinks
+from obsidian_mcp.search import IndexedNote, SearchIndex
+
+
+@dataclass(frozen=True)
+class VaultEntry:
+    path: str
+    kind: str
+    size: int
+    modified_at: str
+
+
+class Vault:
+    def __init__(self, settings: VaultSettings, embeddings: EmbeddingSettings | None = None):
+        self.settings = settings
+        self.root = settings.root.resolve()
+        if not self.root.exists() or not self.root.is_dir():
+            raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
+        self._index = SearchIndex(self.root / ".obsidian-mcp" / "index.sqlite", embeddings or EmbeddingSettings())
+        self._index_dirty = True
+
+    def list(self, path: str = "") -> list[dict[str, Any]]:
+        directory = self.resolve(path)
+        if not directory.is_dir():
+            raise ValueError(f"Not a directory: {path}")
+        entries = []
+        for child in sorted(directory.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+            if self._is_ignored_path(child):
+                continue
+            stat = child.stat()
+            entries.append(
+                VaultEntry(
+                    path=self.relative(child),
+                    kind="directory" if child.is_dir() else "file",
+                    size=stat.st_size,
+                    modified_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                ).__dict__
+            )
+        return entries
+
+    def read(self, path: str) -> dict[str, Any]:
+        file_path = self.resolve(path)
+        if not file_path.is_file():
+            raise ValueError(f"Not a file: {path}")
+        content = file_path.read_text(encoding="utf-8")
+        frontmatter, body = split_frontmatter(content)
+        return {
+            "path": self.relative(file_path),
+            "frontmatter": frontmatter,
+            "body": body,
+            "content": content,
+            "wikilinks": [link.__dict__ for link in wikilinks(body)],
+            "markdown_links": markdown_links(body),
+            "tags": sorted(set(_frontmatter_tags(frontmatter) + inline_tags(body))),
+            "block_ids": block_ids(body),
+        }
+
+    def create_note(
+        self,
+        path: str,
+        content: str = "",
+        frontmatter: dict[str, Any] | None = None,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        note_path = self.resolve_for_write(_ensure_md(path))
+        if note_path.exists() and not overwrite:
+            raise FileExistsError(f"Refusing to overwrite existing note: {path}")
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        self._atomic_write(note_path, render_frontmatter(frontmatter or {}, content))
+        self.invalidate_index()
+        return {"ok": True, "path": self.relative(note_path)}
+
+    def update_note(
+        self,
+        path: str,
+        content: str | None = None,
+        frontmatter_patch: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        note_path = self.resolve(path)
+        if not note_path.is_file():
+            raise ValueError(f"Not a file: {path}")
+        existing = note_path.read_text(encoding="utf-8")
+        _, body = split_frontmatter(existing)
+        next_content = existing
+        if content is not None:
+            current_frontmatter, _ = split_frontmatter(existing)
+            next_content = render_frontmatter(current_frontmatter, content)
+        if frontmatter_patch:
+            next_content = patch_frontmatter(next_content, frontmatter_patch)
+        if next_content != existing:
+            self._atomic_write(note_path, next_content)
+            self.invalidate_index()
+        return {"ok": True, "path": self.relative(note_path), "changed": next_content != existing, "previous_body": body}
+
+    def move_path(self, source: str, destination: str, rewrite_links: bool = True, overwrite: bool = False) -> dict[str, Any]:
+        src = self.resolve(source)
+        dst = self.resolve_for_write(destination)
+        if not src.exists():
+            raise FileNotFoundError(source)
+        if dst.exists() and not overwrite:
+            raise FileExistsError(f"Destination already exists: {destination}")
+
+        old_names = self._link_names_for(src)
+        new_name = dst.stem if dst.suffix == ".md" else dst.name
+
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+
+        rewritten = 0
+        if rewrite_links and src.suffix == ".md" and dst.suffix == ".md" and old_names and old_names != {new_name}:
+            rewritten = self._rewrite_links(old_names, new_name)
+
+        self.invalidate_index()
+        return {
+            "ok": True,
+            "source": source,
+            "destination": self.relative(dst),
+            "rewritten_files": rewritten,
+        }
+
+    def delete_path(self, path: str, recursive: bool = False, strategy: str = "trash") -> dict[str, Any]:
+        target = self.resolve(path)
+        if target == self.root:
+            raise ValueError("Refusing to delete the vault root")
+        if not target.exists():
+            raise FileNotFoundError(path)
+
+        if target.is_dir() and any(target.iterdir()) and not recursive:
+            raise ValueError("Directory is not empty; pass recursive=True")
+
+        if strategy == "trash":
+            trash = self.resolve_for_write(self.settings.trash_path)
+            trash.mkdir(parents=True, exist_ok=True)
+            destination = trash / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{target.name}"
+            shutil.move(str(target), str(destination))
+            result = {"ok": True, "path": path, "trashed_to": self.relative(destination)}
+        elif strategy == "delete":
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            result = {"ok": True, "path": path, "deleted": True}
+        else:
+            raise ValueError("strategy must be 'trash' or 'delete'")
+
+        self.invalidate_index()
+        return result
+
+    def search(self, query: str, limit: int = 10, mode: str = "hybrid") -> dict[str, Any]:
+        if self._index_dirty:
+            self._index.rebuild(
+                [IndexedNote(path=path, content=content) for path, content in self._markdown_files().items()]
+            )
+            self._index_dirty = False
+        return self._index.search(query=query, limit=limit, mode=mode)  # type: ignore[arg-type]
+
+    def backlinks(self, path: str) -> dict[str, Any]:
+        target = self.resolve(path)
+        names = self._link_names_for(target)
+        hits = []
+        for candidate, content in self._markdown_files().items():
+            if candidate == self.relative(target):
+                continue
+            matched = [link.raw for link in wikilinks(content) if link.target in names]
+            if matched:
+                hits.append({"path": candidate, "links": matched})
+        return {"path": self.relative(target), "backlinks": hits}
+
+    def invalidate_index(self) -> None:
+        self._index_dirty = True
+
+    def resolve(self, path: str) -> Path:
+        clean = _clean_relative_path(path)
+        resolved = (self.root / clean).resolve()
+        self._ensure_inside_root(resolved)
+        return resolved
+
+    def resolve_for_write(self, path: str) -> Path:
+        clean = _clean_relative_path(path)
+        if _is_internal_path(clean):
+            raise ValueError("Path points to internal obsidian-mcp storage")
+        candidate = self.root / clean
+        parent = candidate.parent.resolve()
+        self._ensure_inside_root(parent)
+        return parent / candidate.name
+
+    def relative(self, path: Path) -> str:
+        return path.resolve().relative_to(self.root).as_posix()
+
+    def _ensure_inside_root(self, path: Path) -> None:
+        if os.path.commonpath([self.root, path]) != str(self.root):
+            raise ValueError("Path escapes vault root")
+
+    def _markdown_files(self) -> dict[str, str]:
+        files = {}
+        for path in self.root.rglob("*.md"):
+            if path.is_file() and not self._is_ignored_path(path):
+                files[self.relative(path)] = path.read_text(encoding="utf-8")
+        return files
+
+    def _rewrite_links(self, old_names: set[str], new_name: str) -> int:
+        changed = 0
+        for path in self.root.rglob("*.md"):
+            if not path.is_file():
+                continue
+            original = path.read_text(encoding="utf-8")
+            updated = rewrite_wikilink_targets(original, old_names, new_name)
+            if updated != original:
+                self._atomic_write(path, updated)
+                changed += 1
+        return changed
+
+    def _link_names_for(self, path: Path) -> set[str]:
+        names = {path.stem}
+        if path.suffix == ".md":
+            relative = self.relative(path)
+            names.add(Path(relative).with_suffix("").as_posix())
+            names.add(relative)
+        return names
+
+    def _is_ignored_path(self, path: Path) -> bool:
+        ignored_roots = {self.settings.trash_path, ".obsidian-mcp"}
+        return bool(ignored_roots.intersection(path.relative_to(self.root).parts))
+
+    def _atomic_write(self, path: Path, content: str) -> None:
+        tmp = path.with_name(f".{path.name}.tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+
+
+def _clean_relative_path(path: str) -> Path:
+    if not path or path == ".":
+        return Path()
+    candidate = Path(path)
+    if candidate.is_absolute():
+        raise ValueError("Vault paths must be relative")
+    if any(part in {"..", ""} for part in candidate.parts):
+        raise ValueError("Vault path contains unsafe segments")
+    return candidate
+
+
+def _ensure_md(path: str) -> str:
+    return path if Path(path).suffix else f"{path}.md"
+
+
+def _is_internal_path(path: Path) -> bool:
+    return ".obsidian-mcp" in path.parts
+
+
+def _frontmatter_tags(frontmatter: dict[str, Any]) -> list[str]:
+    tags = frontmatter.get("tags", [])
+    if isinstance(tags, str):
+        return [tags.lstrip("#")]
+    if isinstance(tags, list):
+        return [str(tag).lstrip("#") for tag in tags]
+    return []

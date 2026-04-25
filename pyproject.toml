@@ -1,0 +1,20 @@
+[project]
+name = "obsidian-mcp"
+version = "0.1.0"
+description = "Headless HTTP MCP server for Obsidian-flavored Markdown vaults"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "mcp>=1.16.0",
+    "openai>=1.109.0",
+    "pydantic>=2.11.0",
+    "pydantic-settings>=2.10.0",
+    "ruamel.yaml>=0.18.10",
+]
+
+[project.scripts]
+obsidian-mcp = "obsidian_mcp.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
