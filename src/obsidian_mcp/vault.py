@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from obsidian_mcp.config import EmbeddingSettings, VaultSettings
-from obsidian_mcp.frontmatter import patch_frontmatter, render_frontmatter, split_frontmatter
+from obsidian_mcp.frontmatter import (
+    patch_frontmatter,
+    render_frontmatter,
+    split_frontmatter,
+    split_frontmatter_raw,
+)
 from obsidian_mcp.obsidian import block_ids, inline_tags, markdown_links, rewrite_wikilink_targets, wikilinks
 from obsidian_mcp.search import IndexedNote, SearchIndex
 
@@ -93,7 +98,7 @@ class Vault:
         _, body = split_frontmatter(existing)
         next_content = existing
         if content is not None:
-            current_frontmatter, _ = split_frontmatter(existing)
+            current_frontmatter, _ = split_frontmatter_raw(existing)
             next_content = render_frontmatter(current_frontmatter, content)
         if frontmatter_patch:
             next_content = patch_frontmatter(next_content, frontmatter_patch)
