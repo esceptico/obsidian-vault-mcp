@@ -36,7 +36,9 @@ class Vault:
         if not self.root.exists() or not self.root.is_dir():
             raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
         self._index = SearchIndex(self.root / ".obsidian-mcp" / "index.sqlite", embeddings or EmbeddingSettings())
-        self._index_dirty = True
+        # Full rebuild only on first start (empty index) or explicit vault_reindex.
+        # Subsequent writes go through upsert/delete.
+        self._index_dirty = self._index.store.count_notes() == 0
         self._lock = threading.RLock()
 
     def list(self, path: str = "") -> list[dict[str, Any]]:
@@ -87,9 +89,10 @@ class Vault:
             if note_path.exists() and not overwrite:
                 raise FileExistsError(f"Refusing to overwrite existing note: {path}")
             note_path.parent.mkdir(parents=True, exist_ok=True)
-            self._atomic_write(note_path, render_frontmatter(frontmatter or {}, content))
-            self.invalidate_index()
+            rendered = render_frontmatter(frontmatter or {}, content)
+            self._atomic_write(note_path, rendered)
             rel = self.relative(note_path)
+            self._index.upsert_note(IndexedNote(path=rel, content=rendered))
             log.info("create_note path=%s", rel)
             return {"ok": True, "path": rel}
 
@@ -114,8 +117,9 @@ class Vault:
             changed = next_content != existing
             if changed:
                 self._atomic_write(note_path, next_content)
-                self.invalidate_index()
-                log.info("update_note path=%s", self.relative(note_path))
+                rel = self.relative(note_path)
+                self._index.upsert_note(IndexedNote(path=rel, content=next_content))
+                log.info("update_note path=%s", rel)
             return {
                 "ok": True,
                 "path": self.relative(note_path),
@@ -128,6 +132,7 @@ class Vault:
             return self._move_path_locked(source, destination, rewrite_links, overwrite)
 
     def _move_path_locked(self, source: str, destination: str, rewrite_links: bool, overwrite: bool) -> dict[str, Any]:
+        original_source = source
         src = self.resolve(source)
         dst = self.resolve_for_write(destination)
         if not src.exists():
@@ -135,6 +140,7 @@ class Vault:
         if dst.exists() and not overwrite:
             raise FileExistsError(f"Destination already exists: {destination}")
 
+        old_rel = self._relative_str(src)
         old_names = self._link_names_for(src)
         is_note_rename = (
             rewrite_links and src.suffix == ".md" and dst.suffix == ".md" and bool(old_names)
@@ -176,17 +182,25 @@ class Vault:
             try:
                 shutil.move(str(dst), str(src))
             except Exception:
-                log.exception("rollback of move %s -> %s failed", source, destination)
+                log.exception("rollback of move %s -> %s failed", original_source, destination)
             raise
 
-        self.invalidate_index()
+        if src.suffix == ".md":
+            self._index.delete_note(old_rel)
+        if dst.is_file() and dst.suffix == ".md":
+            self._index.upsert_note(
+                IndexedNote(path=self.relative(dst), content=dst.read_text(encoding="utf-8"))
+            )
+        for path, content in pending_rewrites:
+            self._index.upsert_note(IndexedNote(path=self.relative(path), content=content))
+
         log.info(
             "move_path source=%s destination=%s rewritten=%d",
-            source, self.relative(dst), len(pending_rewrites),
+            original_source, self.relative(dst), len(pending_rewrites),
         )
         return {
             "ok": True,
-            "source": source,
+            "source": original_source,
             "destination": self.relative(dst),
             "rewritten_files": len(pending_rewrites),
         }
@@ -208,6 +222,16 @@ class Vault:
 
             log.info("delete_path path=%s strategy=%s recursive=%s", path, strategy, recursive)
 
+            affected_md: list[str] = []
+            if target.is_file() and target.suffix == ".md":
+                affected_md = [self.relative(target)]
+            elif target.is_dir():
+                affected_md = [
+                    self.relative(p)
+                    for p in target.rglob("*.md")
+                    if p.is_file() and not self._is_ignored_path(p)
+                ]
+
             if strategy == "trash":
                 trash = self.resolve_for_write(self.settings.trash_path)
                 trash.mkdir(parents=True, exist_ok=True)
@@ -223,7 +247,8 @@ class Vault:
             else:
                 raise ValueError("strategy must be 'trash' or 'delete'")
 
-            self.invalidate_index()
+            for md in affected_md:
+                self._index.delete_note(md)
             return result
 
     def search(self, query: str, limit: int = 10, mode: str = "hybrid") -> dict[str, Any]:

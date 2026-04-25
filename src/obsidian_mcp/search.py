@@ -28,6 +28,15 @@ class SearchIndex:
         if self.embeddings.enabled:
             self._embed_missing(records)
 
+    def upsert_note(self, note: IndexedNote) -> None:
+        record = _stored_note(note)
+        self.store.upsert_note(record)
+        if self.embeddings.enabled:
+            self._embed_missing([record])
+
+    def delete_note(self, path: str) -> None:
+        self.store.delete_note(path)
+
     def search(
         self,
         query: str,

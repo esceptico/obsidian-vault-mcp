@@ -42,5 +42,16 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(hybrid["hits"][0]["source"], "hybrid")
 
 
+    def test_upsert_does_not_full_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            index = SearchIndex(Path(tmp) / "i.sqlite", EmbeddingSettings())
+            index.rebuild([IndexedNote(path="A.md", content="alpha")])
+            index.upsert_note(IndexedNote(path="B.md", content="beta"))
+            beta_hits = [hit["path"] for hit in index.search("beta", mode="bm25")["hits"]]
+            alpha_hits = [hit["path"] for hit in index.search("alpha", mode="bm25")["hits"]]
+            self.assertIn("B.md", beta_hits)
+            self.assertIn("A.md", alpha_hits)
+
+
 if __name__ == "__main__":
     unittest.main()

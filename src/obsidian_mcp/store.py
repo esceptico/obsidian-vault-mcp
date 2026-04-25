@@ -67,6 +67,13 @@ VALUES (?, ?, ?, ?, ?)
 
 DELETE_ALL_EMBEDDINGS = "DELETE FROM note_embeddings"
 DELETE_STALE_EMBEDDINGS_TEMPLATE = "DELETE FROM note_embeddings WHERE path NOT IN ({placeholders})"
+DELETE_NOTE = "DELETE FROM notes WHERE path = ?"
+DELETE_EMBEDDING = "DELETE FROM note_embeddings WHERE path = ?"
+DELETE_EMBEDDING_BY_STALE_HASH = """
+DELETE FROM note_embeddings
+WHERE path = ? AND content_hash != ?
+"""
+COUNT_NOTES = "SELECT COUNT(*) FROM notes"
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,7 @@ class SearchStore:
             connection.execute(CREATE_EMBEDDINGS_TABLE)
 
     def replace_notes(self, notes: list[StoredNote]) -> None:
+        paths_by_hash = {note.path: note.content_hash for note in notes}
         with self.connect() as connection:
             connection.execute(DELETE_NOTES)
             for note in notes:
@@ -123,7 +131,25 @@ class SearchStore:
                     INSERT_NOTE,
                     (note.path, note.title, note.frontmatter_json, note.body, note.tags_text),
                 )
-            self.delete_stale_embeddings(connection, {note.path for note in notes})
+            self._evict_stale_embeddings(connection, paths_by_hash)
+
+    def upsert_note(self, note: StoredNote) -> None:
+        with self.connect() as connection:
+            connection.execute(DELETE_NOTE, (note.path,))
+            connection.execute(
+                INSERT_NOTE,
+                (note.path, note.title, note.frontmatter_json, note.body, note.tags_text),
+            )
+            connection.execute(DELETE_EMBEDDING_BY_STALE_HASH, (note.path, note.content_hash))
+
+    def delete_note(self, path: str) -> None:
+        with self.connect() as connection:
+            connection.execute(DELETE_NOTE, (path,))
+            connection.execute(DELETE_EMBEDDING, (path,))
+
+    def count_notes(self) -> int:
+        with self.connect() as connection:
+            return connection.execute(COUNT_NOTES).fetchone()[0]
 
     def search_fts(self, query: str, limit: int) -> list[FtsHit]:
         try:
@@ -186,12 +212,21 @@ class SearchStore:
             for row in rows
         ]
 
-    def delete_stale_embeddings(self, connection: sqlite3.Connection, paths: set[str]) -> None:
-        if not paths:
+    def _evict_stale_embeddings(
+        self,
+        connection: sqlite3.Connection,
+        paths_by_hash: dict[str, str],
+    ) -> None:
+        if not paths_by_hash:
             connection.execute(DELETE_ALL_EMBEDDINGS)
             return
-        placeholders = ",".join("?" for _ in paths)
-        connection.execute(DELETE_STALE_EMBEDDINGS_TEMPLATE.format(placeholders=placeholders), tuple(paths))
+        placeholders = ",".join("?" for _ in paths_by_hash)
+        connection.execute(
+            DELETE_STALE_EMBEDDINGS_TEMPLATE.format(placeholders=placeholders),
+            tuple(paths_by_hash),
+        )
+        for path, content_hash in paths_by_hash.items():
+            connection.execute(DELETE_EMBEDDING_BY_STALE_HASH, (path, content_hash))
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path)
