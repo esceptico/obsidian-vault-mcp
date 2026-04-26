@@ -173,12 +173,16 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         sort_by: ListSortBy = ListSortBy.NAME,
         sort_order: SortOrder = SortOrder.ASC,
     ) -> list[dict[str, Any]]:
-        """List files and directories under a vault-relative path. Pass "" for the vault root."""
+        """List files and directories with size/created_at/modified_at metadata.
+
+        Pass "" for the vault root. Sort with sort_by=name|modified_at|created_at|size
+        and sort_order=asc|desc.
+        """
         return vault.list(path, sort_by, sort_order)
 
     @mcp.tool()
     def vault_read(path: str) -> dict[str, Any]:
-        """Read a Markdown file with frontmatter, links, tags, and content."""
+        """Read a Markdown file with content, frontmatter, links, tags, and file metadata."""
         return vault.read(path)
 
     @mcp.tool()
