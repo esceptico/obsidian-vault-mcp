@@ -46,6 +46,7 @@ _CORS_ALLOW_HEADERS = [
 # exposes them. Mcp-Session-Id must be readable so the client can store and
 # forward it on subsequent requests.
 _CORS_EXPOSE_HEADERS = ["Mcp-Session-Id"]
+_HEALTH_PATH = "/health"
 
 
 class BearerAuthMiddleware:
@@ -69,6 +70,24 @@ class BearerAuthMiddleware:
         provided = _bearer_header(scope)
         if not hmac.compare_digest(provided, self._expected):
             await _send_unauthorized(send)
+            return
+        await self._app(scope, receive, send)
+
+
+class HealthMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope.get("path") == _HEALTH_PATH:
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b'{"ok":true}'})
             return
         await self._app(scope, receive, send)
 
@@ -128,6 +147,7 @@ def build_asgi_app(settings: ServerSettings, mcp: FastMCP) -> ASGIApp:
     app: ASGIApp = mcp.streamable_http_app()
     if settings.auth_token:
         app = BearerAuthMiddleware(app, settings.auth_token)
+    app = HealthMiddleware(app)
     app = CORSMiddleware(
         app,
         allow_origins=["*"],

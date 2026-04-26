@@ -26,7 +26,7 @@ uv sync
 export OBSIDIAN_MCP_VAULT_ROOT="$HOME/path/to/vault"
 export OBSIDIAN_MCP_AUTH_TOKEN="change-me"
 export OPENAI_API_KEY="sk-..."
-uv run obsidian-mcp serve --host 127.0.0.1 --port 8000
+uv run obsidian-mcp run --host 127.0.0.1 --port 8000
 ```
 
 The MCP endpoint is:
@@ -57,6 +57,22 @@ For remote access, put the server behind HTTPS and keep `OBSIDIAN_MCP_AUTH_TOKEN
 - `obsidian_mcp.markdown`: Obsidian-flavored Markdown parsing and rewriting
 - `obsidian_mcp.transport`: HTTP MCP transport
 - `obsidian_mcp.vault`: safe filesystem operations and file watching
+
+## Local Daemon
+
+```bash
+uv run obsidian-mcp start --host 127.0.0.1 --port 8000
+uv run obsidian-mcp status
+uv run obsidian-mcp logs
+uv run obsidian-mcp logs -f
+uv run obsidian-mcp stop
+```
+
+Daemon state is stored at:
+
+```text
+~/Library/Application Support/obsidian-mcp/
+```
 
 ## Notes
 

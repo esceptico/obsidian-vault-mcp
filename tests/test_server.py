@@ -119,6 +119,14 @@ class BuildAsgiAppTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_health_endpoint_does_not_require_auth(self) -> None:
+        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        app = build_asgi_app(settings, create_mcp(settings))
+        client = TestClient(app)
+        response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+
     def test_cors_allows_mcp_protocol_version_header(self) -> None:
         """Per the Streamable HTTP spec, clients MUST send MCP-Protocol-Version
         on every request after handshake. If the CORS allow_headers list
