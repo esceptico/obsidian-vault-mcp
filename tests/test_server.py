@@ -139,7 +139,7 @@ class BuildAsgiAppTests(unittest.TestCase):
 
 
 class ToolSchemaTests(unittest.TestCase):
-    def test_nullable_fields_are_not_required_when_defaults_exist(self) -> None:
+    def _tools(self):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.dict(os.environ, {"OBSIDIAN_MCP_VAULT_ROOT": tmp}, clear=True):
                 mcp = create_mcp(ServerSettings(_env_file=None))  # type: ignore[call-arg]
@@ -147,10 +147,26 @@ class ToolSchemaTests(unittest.TestCase):
             async def list_tools():
                 return await mcp.list_tools()
 
-            tools = {tool.name: tool.inputSchema for tool in asyncio.run(list_tools())}
+            return {tool.name: tool for tool in asyncio.run(list_tools())}
 
-        self.assertEqual(tools["vault_create_note"]["required"], ["path", "content"])
-        self.assertEqual(tools["vault_update_note"]["required"], ["path"])
+    def test_nullable_fields_are_not_required_when_defaults_exist(self) -> None:
+        tools = self._tools()
+        self.assertEqual(tools["vault_create_note"].inputSchema["required"], ["path", "content"])
+        self.assertEqual(tools["vault_update_note"].inputSchema["required"], ["path"])
+
+    def test_tool_annotations_mark_read_only_tools(self) -> None:
+        tools = self._tools()
+        for name in ["vault_list", "vault_read", "vault_search", "vault_backlinks", "vault_reindex"]:
+            self.assertTrue(tools[name].annotations.readOnlyHint, name)
+            self.assertFalse(tools[name].annotations.destructiveHint, name)
+
+    def test_tool_annotations_mark_mutation_tools(self) -> None:
+        tools = self._tools()
+        for name in ["vault_create_note", "vault_update_note", "vault_move_path"]:
+            self.assertFalse(tools[name].annotations.readOnlyHint, name)
+            self.assertFalse(tools[name].annotations.destructiveHint, name)
+        self.assertFalse(tools["vault_delete_path"].annotations.readOnlyHint)
+        self.assertTrue(tools["vault_delete_path"].annotations.destructiveHint)
 
 
 if __name__ == "__main__":

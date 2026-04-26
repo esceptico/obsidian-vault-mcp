@@ -4,6 +4,7 @@ from typing import Any
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -43,6 +44,9 @@ _CORS_ALLOW_HEADERS = [
 # forward it on subsequent requests.
 _CORS_EXPOSE_HEADERS = ["Mcp-Session-Id"]
 _HEALTH_PATH = "/health"
+_READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+_WRITE_SAFE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+_WRITE_DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
 
 
 class BearerAuthMiddleware:
@@ -167,7 +171,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     materially improve client UX (search mode/limit, default destructive
     strategy=trash). Everything else is required."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_list(
         path: str,
         sort_by: ListSortBy = ListSortBy.NAME,
@@ -180,12 +184,12 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """
         return vault.list(path, sort_by, sort_order)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_read(path: str) -> dict[str, Any]:
         """Read a Markdown file with content, frontmatter, links, tags, and file metadata."""
         return vault.read(path)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_search(
         query: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
@@ -194,7 +198,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Search vault notes. Hybrid combines FTS5 + embeddings; vector requires OPENAI_API_KEY."""
         return vault.search(query, limit, mode)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_WRITE_SAFE)
     def vault_create_note(
         path: str,
         content: str,
@@ -204,7 +208,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Create a Markdown note. Pass `overwrite=true` to replace an existing one."""
         return vault.create_note(path, content, frontmatter, overwrite)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_WRITE_SAFE)
     def vault_update_note(
         path: str,
         content: str | None = None,
@@ -213,7 +217,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Replace a note body and/or patch YAML frontmatter. Null patch values delete keys."""
         return vault.update_note(path, content, frontmatter_patch)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_WRITE_SAFE)
     def vault_move_path(
         source: str,
         destination: str,
@@ -223,7 +227,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Move or rename a file/directory, with wikilink rewriting for note renames."""
         return vault.move_path(source, destination, rewrite_links, overwrite)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_WRITE_DESTRUCTIVE)
     def vault_delete_path(
         path: str,
         recursive: bool = False,
@@ -232,12 +236,12 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Delete a file or directory. `strategy=trash` (default) preserves the file in .trash/."""
         return vault.delete_path(path, recursive, strategy)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_backlinks(path: str) -> dict[str, Any]:
         """Find notes that link to a target note via Obsidian wikilinks."""
         return vault.backlinks(path)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_READ_ONLY)
     def vault_reindex() -> dict[str, Any]:
         """Re-scan the vault from disk and bring the index up to date.
         Returns a diff summary (added / modified / removed / unchanged / embedded)."""
