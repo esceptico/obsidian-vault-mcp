@@ -45,8 +45,11 @@ _CORS_ALLOW_HEADERS = [
 _CORS_EXPOSE_HEADERS = ["Mcp-Session-Id"]
 _HEALTH_PATH = "/health"
 _READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-_WRITE_SAFE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
-_WRITE_DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
+_REINDEX = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+_CREATE_NOTE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
+_UPDATE_NOTE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+_MOVE_PATH = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
+_DELETE_PATH = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
 
 
 class BearerAuthMiddleware:
@@ -198,7 +201,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Search vault notes. Hybrid combines FTS5 + embeddings; vector requires OPENAI_API_KEY."""
         return vault.search(query, limit, mode)
 
-    @mcp.tool(annotations=_WRITE_SAFE)
+    @mcp.tool(annotations=_CREATE_NOTE)
     def vault_create_note(
         path: str,
         content: str,
@@ -208,7 +211,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Create a Markdown note. Pass `overwrite=true` to replace an existing one."""
         return vault.create_note(path, content, frontmatter, overwrite)
 
-    @mcp.tool(annotations=_WRITE_SAFE)
+    @mcp.tool(annotations=_UPDATE_NOTE)
     def vault_update_note(
         path: str,
         content: str | None = None,
@@ -217,7 +220,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Replace a note body and/or patch YAML frontmatter. Null patch values delete keys."""
         return vault.update_note(path, content, frontmatter_patch)
 
-    @mcp.tool(annotations=_WRITE_SAFE)
+    @mcp.tool(annotations=_MOVE_PATH)
     def vault_move_path(
         source: str,
         destination: str,
@@ -227,7 +230,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Move or rename a file/directory, with wikilink rewriting for note renames."""
         return vault.move_path(source, destination, rewrite_links, overwrite)
 
-    @mcp.tool(annotations=_WRITE_DESTRUCTIVE)
+    @mcp.tool(annotations=_DELETE_PATH)
     def vault_delete_path(
         path: str,
         recursive: bool = False,
@@ -241,7 +244,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         """Find notes that link to a target note via Obsidian wikilinks."""
         return vault.backlinks(path)
 
-    @mcp.tool(annotations=_READ_ONLY)
+    @mcp.tool(annotations=_REINDEX)
     def vault_reindex() -> dict[str, Any]:
         """Re-scan the vault from disk and bring the index up to date.
         Returns a diff summary (added / modified / removed / unchanged / embedded)."""

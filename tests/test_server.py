@@ -156,17 +156,34 @@ class ToolSchemaTests(unittest.TestCase):
 
     def test_tool_annotations_mark_read_only_tools(self) -> None:
         tools = self._tools()
-        for name in ["vault_list", "vault_read", "vault_search", "vault_backlinks", "vault_reindex"]:
+        for name in ["vault_list", "vault_read", "vault_search", "vault_backlinks"]:
             self.assertTrue(tools[name].annotations.readOnlyHint, name)
             self.assertFalse(tools[name].annotations.destructiveHint, name)
+            self.assertTrue(tools[name].annotations.idempotentHint, name)
+            self.assertFalse(tools[name].annotations.openWorldHint, name)
 
-    def test_tool_annotations_mark_mutation_tools(self) -> None:
+    def test_tool_annotations_mark_reindex_as_safe_action(self) -> None:
         tools = self._tools()
-        for name in ["vault_create_note", "vault_update_note", "vault_move_path"]:
-            self.assertFalse(tools[name].annotations.readOnlyHint, name)
-            self.assertFalse(tools[name].annotations.destructiveHint, name)
-        self.assertFalse(tools["vault_delete_path"].annotations.readOnlyHint)
-        self.assertTrue(tools["vault_delete_path"].annotations.destructiveHint)
+        annotations = tools["vault_reindex"].annotations
+        self.assertFalse(annotations.readOnlyHint)
+        self.assertFalse(annotations.destructiveHint)
+        self.assertTrue(annotations.idempotentHint)
+        self.assertFalse(annotations.openWorldHint)
+
+    def test_tool_annotations_mark_content_mutations_as_destructive(self) -> None:
+        tools = self._tools()
+        expected = {
+            "vault_create_note": False,
+            "vault_update_note": True,
+            "vault_move_path": False,
+            "vault_delete_path": False,
+        }
+        for name, idempotent in expected.items():
+            annotations = tools[name].annotations
+            self.assertFalse(annotations.readOnlyHint, name)
+            self.assertTrue(annotations.destructiveHint, name)
+            self.assertEqual(annotations.idempotentHint, idempotent, name)
+            self.assertFalse(annotations.openWorldHint, name)
 
 
 if __name__ == "__main__":
