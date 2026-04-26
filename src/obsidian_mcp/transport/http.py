@@ -10,7 +10,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from obsidian_mcp.core.config import ServerSettings, load_settings
 from obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS
 from obsidian_mcp.core.logging import get_logger
-from obsidian_mcp.core.types import DeleteStrategy, SearchMode
+from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
 from obsidian_mcp.vault.service import Vault
 
 log = get_logger("server")
@@ -168,9 +168,13 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     strategy=trash). Everything else is required."""
 
     @mcp.tool()
-    def vault_list(path: str) -> list[dict[str, Any]]:
+    def vault_list(
+        path: str,
+        sort_by: ListSortBy = ListSortBy.NAME,
+        sort_order: SortOrder = SortOrder.ASC,
+    ) -> list[dict[str, Any]]:
         """List files and directories under a vault-relative path. Pass "" for the vault root."""
-        return vault.list(path)
+        return vault.list(path, sort_by, sort_order)
 
     @mcp.tool()
     def vault_read(path: str) -> dict[str, Any]:

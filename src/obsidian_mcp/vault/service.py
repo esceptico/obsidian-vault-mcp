@@ -29,7 +29,7 @@ from obsidian_mcp.markdown.obsidian import (
     wikilinks,
 )
 from obsidian_mcp.core.logging import get_logger
-from obsidian_mcp.core.types import DeleteStrategy, EntryKind, SearchMode
+from obsidian_mcp.core.types import DeleteStrategy, EntryKind, ListSortBy, SearchMode, SortOrder
 from obsidian_mcp.index.search import IndexedNote, SearchIndex
 from obsidian_mcp.vault.paths import (
     clean_relative_path,
@@ -47,6 +47,7 @@ class VaultEntry:
     path: str
     kind: EntryKind
     size: int
+    created_at: str | None
     modified_at: str
 
 
@@ -113,25 +114,31 @@ class Vault:
             self._index.delete_note(rel)
         log.info("watcher delete path=%s", rel)
 
-    def list(self, path: str) -> list[dict[str, Any]]:
+    def list(
+        self,
+        path: str,
+        sort_by: ListSortBy = ListSortBy.NAME,
+        sort_order: SortOrder = SortOrder.ASC,
+    ) -> list[dict[str, Any]]:
+        sort_by = ListSortBy(sort_by)
+        sort_order = SortOrder(sort_order)
         directory = self.resolve(path)
         if not directory.is_dir():
             raise ValueError(f"Not a directory: {path}")
         entries = []
-        for child in sorted(directory.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+        for child in directory.iterdir():
             if self._is_ignored_path(child):
                 continue
-            stat = child.stat()
             kind = EntryKind.DIRECTORY if child.is_dir() else EntryKind.FILE
+            metadata = file_metadata(child)
             entries.append(
                 {
                     "path": self.relative(child),
                     "kind": kind.value,
-                    "size": stat.st_size,
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                    **metadata,
                 }
             )
-        return entries
+        return _sort_entries(entries, sort_by, sort_order)
 
     def read(self, path: str) -> dict[str, Any]:
         file_path = self.resolve(path)
@@ -144,6 +151,7 @@ class Vault:
             "frontmatter": frontmatter,
             "body": body,
             "content": content,
+            "file": file_metadata(file_path),
             "wikilinks": [link.__dict__ for link in wikilinks(body)],
             "markdown_links": markdown_links(body),
             "tags": sorted(set(frontmatter_tags(frontmatter) + inline_tags(body))),
@@ -526,3 +534,36 @@ _DELETE_DISPATCH = {
     DeleteStrategy.TRASH: Vault._delete_to_trash,
     DeleteStrategy.DELETE: Vault._delete_permanently,
 }
+
+
+def file_metadata(path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    created_at = getattr(stat, "st_birthtime", None)
+    return {
+        "size": stat.st_size,
+        "created_at": _timestamp(created_at) if created_at is not None else None,
+        "modified_at": _timestamp(stat.st_mtime),
+    }
+
+
+def _timestamp(value: float) -> str:
+    return datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+
+def _sort_entries(entries: list[dict[str, Any]], sort_by: ListSortBy, sort_order: SortOrder) -> list[dict[str, Any]]:
+    if sort_by == ListSortBy.NAME:
+        reverse = sort_order == SortOrder.DESC
+        directories = [entry for entry in entries if entry["kind"] == EntryKind.DIRECTORY.value]
+        files = [entry for entry in entries if entry["kind"] == EntryKind.FILE.value]
+        return sorted(directories, key=lambda entry: entry["path"].lower(), reverse=reverse) + sorted(
+            files, key=lambda entry: entry["path"].lower(), reverse=reverse
+        )
+
+    reverse = sort_order == SortOrder.DESC
+    with_value = [entry for entry in entries if entry[sort_by.value] is not None]
+    without_value = [entry for entry in entries if entry[sort_by.value] is None]
+
+    def key(entry: dict[str, Any]) -> tuple[Any, str]:
+        return entry[sort_by.value], entry["path"].lower()
+
+    return sorted(with_value, key=key, reverse=reverse) + sorted(without_value, key=lambda entry: entry["path"].lower())

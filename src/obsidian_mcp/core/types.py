@@ -17,6 +17,18 @@ class EntryKind(StrEnum):
     DIRECTORY = "directory"
 
 
+class ListSortBy(StrEnum):
+    NAME = "name"
+    MODIFIED_AT = "modified_at"
+    CREATED_AT = "created_at"
+    SIZE = "size"
+
+
+class SortOrder(StrEnum):
+    ASC = "asc"
+    DESC = "desc"
+
+
 class HitSource(StrEnum):
     FTS = "fts"
     VECTOR = "vector"

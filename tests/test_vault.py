@@ -1,10 +1,11 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from obsidian_mcp.core.config import EmbeddingSettings, VaultSettings
 from obsidian_mcp.markdown.frontmatter import patch_frontmatter, split_frontmatter
-from obsidian_mcp.core.types import DeleteStrategy, SearchMode
+from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
 from obsidian_mcp.vault.service import Vault
 
 
@@ -34,8 +35,14 @@ class VaultTests(unittest.TestCase):
     def _trash(self, vault: Vault, path: str) -> dict:
         return vault.delete_path(path, recursive=False, strategy=DeleteStrategy.TRASH)
 
-    def _list(self, vault: Vault, path: str = "") -> list[dict]:
-        return vault.list(path)
+    def _list(
+        self,
+        vault: Vault,
+        path: str = "",
+        sort_by: ListSortBy = ListSortBy.NAME,
+        sort_order: SortOrder = SortOrder.ASC,
+    ) -> list[dict]:
+        return vault.list(path, sort_by, sort_order)
 
     def _bm25(self, vault: Vault, query: str) -> dict:
         return vault.search(query, limit=10, mode=SearchMode.BM25)
@@ -59,6 +66,10 @@ class VaultTests(unittest.TestCase):
             note = vault.read("Projects/Alpha.md")
             self.assertEqual(note["frontmatter"]["tags"], ["ai"])
             self.assertIn("semantic", note["body"])
+            self.assertIn("file", note)
+            self.assertIsInstance(note["file"]["size"], int)
+            self.assertIn("modified_at", note["file"])
+            self.assertIn("created_at", note["file"])
 
             results = self._bm25(vault, "semantic search")
             self.assertEqual(results["hits"][0]["path"], "Projects/Alpha.md")
@@ -100,6 +111,47 @@ class VaultTests(unittest.TestCase):
             (Path(tmp.name) / ".trash").mkdir()
             (Path(tmp.name) / ".trash" / "x.md").write_text("x", encoding="utf-8")
             self.assertNotIn(".trash", {entry["path"] for entry in self._list(vault)})
+
+    def test_list_sort_by_name_keeps_directories_first(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            (Path(tmp.name) / "Beta").mkdir()
+            (Path(tmp.name) / "Alpha").mkdir()
+            self._create(vault, "zeta", "z")
+            self._create(vault, "aardvark", "a")
+
+            asc = [entry["path"] for entry in self._list(vault, sort_by=ListSortBy.NAME, sort_order=SortOrder.ASC)]
+            desc = [entry["path"] for entry in self._list(vault, sort_by=ListSortBy.NAME, sort_order=SortOrder.DESC)]
+
+            self.assertEqual(asc, ["Alpha", "Beta", "aardvark.md", "zeta.md"])
+            self.assertEqual(desc, ["Beta", "Alpha", "zeta.md", "aardvark.md"])
+
+    def test_list_sort_by_modified_desc(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            self._create(vault, "Old", "old")
+            self._create(vault, "New", "new")
+            old = Path(tmp.name) / "Old.md"
+            new = Path(tmp.name) / "New.md"
+            os.utime(old, (100, 100))
+            os.utime(new, (200, 200))
+
+            paths = [
+                entry["path"]
+                for entry in self._list(vault, sort_by=ListSortBy.MODIFIED_AT, sort_order=SortOrder.DESC)
+                if entry["path"] in {"Old.md", "New.md"}
+            ]
+
+            self.assertEqual(paths, ["New.md", "Old.md"])
+
+    def test_list_entries_include_file_metadata(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            self._create(vault, "Note", "body")
+            entry = next(entry for entry in self._list(vault) if entry["path"] == "Note.md")
+            self.assertIsInstance(entry["size"], int)
+            self.assertIn("modified_at", entry)
+            self.assertIn("created_at", entry)
 
     def test_delete_refuses_obsidian_mcp(self) -> None:
         tmp, vault = self.make_vault()

@@ -49,6 +49,15 @@ For remote access, put the server behind HTTPS and keep `OBSIDIAN_MCP_AUTH_TOKEN
 - `vault_backlinks`
 - `vault_reindex`
 
+`vault_list` supports sorting:
+
+```text
+sort_by: name | modified_at | created_at | size
+sort_order: asc | desc
+```
+
+`vault_read` and `vault_list` include filesystem metadata such as `size`, `created_at`, and `modified_at`. Creation time may be `null` on filesystems that do not expose it.
+
 ## Project Layout
 
 - `obsidian_mcp.app`: CLI entrypoints
