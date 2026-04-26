@@ -4,7 +4,7 @@ import os
 from obsidian_mcp.core.config import load_settings
 from obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT
 from obsidian_mcp.core.types import SearchMode
-from obsidian_mcp.vault import Vault
+from obsidian_mcp.vault.service import Vault
 
 
 def _parse_args() -> argparse.Namespace:

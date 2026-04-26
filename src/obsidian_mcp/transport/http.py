@@ -10,7 +10,7 @@ from obsidian_mcp.core.config import ServerSettings, load_settings
 from obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.core.types import DeleteStrategy, SearchMode
-from obsidian_mcp.vault import Vault
+from obsidian_mcp.vault.service import Vault
 
 log = get_logger("server")
 

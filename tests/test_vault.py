@@ -3,9 +3,9 @@ import unittest
 from pathlib import Path
 
 from obsidian_mcp.core.config import EmbeddingSettings, VaultSettings
-from obsidian_mcp.markdown import patch_frontmatter, split_frontmatter
+from obsidian_mcp.markdown.frontmatter import patch_frontmatter, split_frontmatter
 from obsidian_mcp.core.types import DeleteStrategy, SearchMode
-from obsidian_mcp.vault import Vault
+from obsidian_mcp.vault.service import Vault
 
 
 class FrontmatterTests(unittest.TestCase):

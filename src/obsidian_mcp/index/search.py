@@ -21,7 +21,7 @@ from obsidian_mcp.core.constants import (
 from obsidian_mcp.core.types import HitSource, SearchMode
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.index.store import FtsHit, RecordMeta, SearchStore, StoredNote, VectorHit
-from obsidian_mcp.markdown import frontmatter_tags, split_frontmatter
+from obsidian_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatter
 
 
 log = get_logger("search")

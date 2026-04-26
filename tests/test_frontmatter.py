@@ -1,6 +1,6 @@
 import unittest
 
-from obsidian_mcp.markdown import patch_frontmatter, split_frontmatter
+from obsidian_mcp.markdown.frontmatter import patch_frontmatter, split_frontmatter
 
 
 class FrontmatterTests(unittest.TestCase):

@@ -14,21 +14,23 @@ from obsidian_mcp.core.constants import (
     TRASH_TIMESTAMP_FORMAT,
     WATCHER_DEBOUNCE_SECONDS,
 )
-from obsidian_mcp.markdown import (
-    block_ids,
+from obsidian_mcp.markdown.frontmatter import (
     frontmatter_tags,
-    inline_tags,
-    markdown_links,
     patch_frontmatter,
     render_frontmatter,
     split_frontmatter,
     split_frontmatter_raw,
+)
+from obsidian_mcp.markdown.obsidian import (
+    block_ids,
+    inline_tags,
+    markdown_links,
     rewrite_wikilink_targets,
     wikilinks,
 )
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.core.types import DeleteStrategy, EntryKind, SearchMode
-from obsidian_mcp.index import IndexedNote, SearchIndex
+from obsidian_mcp.index.search import IndexedNote, SearchIndex
 from obsidian_mcp.vault.paths import (
     clean_relative_path,
     ensure_markdown_extension,
