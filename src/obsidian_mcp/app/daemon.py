@@ -1,5 +1,8 @@
+import hashlib
 import os
+import re
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -8,12 +11,13 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from obsidian_mcp.core.config import load_settings
+from obsidian_mcp.core.config import ServerSettings, load_settings
 
 
 STOP_TIMEOUT_SECONDS = 10.0
 START_TIMEOUT_SECONDS = 10.0
 LOG_TAIL_LINES = 200
+INDEX_FILENAME = "index.sqlite"
 
 
 @dataclass(frozen=True)
@@ -23,14 +27,42 @@ class DaemonPaths:
     log_file: Path
 
 
-def daemon_paths() -> DaemonPaths:
-    root = os.environ.get("OBSIDIAN_MCP_STATE_DIR")
-    state_dir = Path(root).expanduser() if root else Path.home() / "Library" / "Application Support" / "obsidian-mcp"
+def daemon_paths(vault_root: Path | None = None) -> DaemonPaths:
+    """Per-vault state file locations. The pidfile and log live OUTSIDE the
+    vault on purpose: a synced vault (iCloud, Dropbox) would otherwise share
+    runtime state across machines, where it's actively wrong (a pid valid on
+    laptop A is meaningless on laptop B)."""
+    if vault_root is None:
+        vault_root = load_settings().vault.root
+    vault_id = _vault_id(vault_root)
+    state_dir = _state_dir()
     return DaemonPaths(
         state_dir=state_dir,
-        pid_file=state_dir / "server.pid",
-        log_file=state_dir / "server.log",
+        pid_file=state_dir / f"{vault_id}.pid",
+        log_file=state_dir / f"{vault_id}.log",
     )
+
+
+def _state_dir() -> Path:
+    custom = os.environ.get("OBSIDIAN_MCP_STATE_DIR")
+    if custom:
+        return Path(custom).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "obsidian-mcp"
+    xdg = os.environ.get("XDG_STATE_HOME")
+    if xdg:
+        return Path(xdg).expanduser() / "obsidian-mcp"
+    return Path.home() / ".local" / "state" / "obsidian-mcp"
+
+
+def _vault_id(vault_root: Path) -> str:
+    """Filename-safe identifier for one vault. Includes the basename for
+    human readability and an 8-char path hash to avoid collisions across
+    vaults that happen to share a name."""
+    resolved = vault_root.expanduser().resolve()
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:8]
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", resolved.name) or "vault"
+    return f"{safe}-{digest}"
 
 
 def start_daemon(host: str | None, port: int | None, timeout: float = START_TIMEOUT_SECONDS) -> int:
@@ -91,16 +123,68 @@ def stop_daemon(timeout: float = STOP_TIMEOUT_SECONDS) -> str:
 
 
 def daemon_status(host: str | None, port: int | None) -> str:
-    paths = daemon_paths()
+    settings = load_settings()
+    paths = daemon_paths(settings.vault.root)
     pid = read_pid(paths.pid_file)
+    note_count = _count_notes(_index_path(settings))
+
     if pid is None:
-        return "stopped"
+        return _format_status(settings=settings, running=False, note_count=note_count)
+
     if not is_process_alive(pid):
         remove_pid(paths.pid_file)
-        return f"stopped (stale pid {pid})"
-    health_host, health_port = _effective_endpoint(host, port)
-    healthy = check_health(_health_host(health_host), health_port)
-    return f"running, pid={pid}, {'healthy' if healthy else 'unhealthy'}"
+        return _format_status(
+            settings=settings, running=False, note_count=note_count, stale_pid=pid
+        )
+
+    return _format_status(settings=settings, running=True, pid=pid, note_count=note_count)
+
+
+def _format_status(
+    *,
+    settings: ServerSettings,
+    running: bool,
+    note_count: int | None,
+    pid: int | None = None,
+    stale_pid: int | None = None,
+) -> str:
+    if running:
+        head = f"● obsidian-mcp running (pid {pid}, port {settings.port})"
+    elif stale_pid is not None:
+        head = f"○ obsidian-mcp not running (stale pid {stale_pid} removed)"
+    else:
+        head = "○ obsidian-mcp not running"
+
+    lines = [head, f"  vault:  {_compress_home(settings.vault.root.expanduser())}"]
+    if note_count is not None:
+        suffix = "" if running else " (last-known)"
+        lines.append(f"  notes:  {note_count} indexed{suffix}")
+    return "\n".join(lines)
+
+
+def _index_path(settings: ServerSettings) -> Path:
+    return settings.vault.root.expanduser() / ".obsidian-mcp" / INDEX_FILENAME
+
+
+def _count_notes(db_path: Path) -> int | None:
+    if not db_path.exists():
+        return None
+    try:
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM note_meta").fetchone()
+        return int(row[0]) if row else None
+    except sqlite3.Error:
+        return None
+
+
+def _compress_home(path: Path) -> str:
+    home = str(Path.home())
+    s = str(path)
+    if s == home:
+        return "~"
+    if s.startswith(home + os.sep):
+        return "~" + s[len(home):]
+    return s
 
 
 def show_logs(follow: bool) -> None:

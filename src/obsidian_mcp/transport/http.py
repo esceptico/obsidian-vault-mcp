@@ -19,10 +19,6 @@ _AUTH_DISABLED_NON_LOOPBACK = (
     "AUTH DISABLED: refusing to bind a non-loopback host without OBSIDIAN_MCP_AUTH_TOKEN. "
     "Set the token, or bind to 127.0.0.1."
 )
-_PUBLIC_URL_MISSING_WARNING = (
-    "auth_token is set but OBSIDIAN_MCP_PUBLIC_URL is not; clients reaching the server through "
-    "a different URL than %s may behave unexpectedly. Set OBSIDIAN_MCP_PUBLIC_URL when proxied."
-)
 _AUTH_DISABLED_LOOPBACK_WARNING = (
     "auth_token not set; tools are exposed without authentication on %s"
 )
@@ -162,8 +158,6 @@ def _validate_auth_posture(settings: ServerSettings) -> None:
     is_loopback = settings.host in LOOPBACK_HOSTS
     if not settings.auth_token and not is_loopback:
         raise RuntimeError(_AUTH_DISABLED_NON_LOOPBACK)
-    if settings.auth_token and settings.public_url is None and not is_loopback:
-        log.warning(_PUBLIC_URL_MISSING_WARNING, settings.resolved_public_url)
     if not settings.auth_token:
         log.warning(_AUTH_DISABLED_LOOPBACK_WARNING, settings.host)
 

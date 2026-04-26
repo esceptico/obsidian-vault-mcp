@@ -67,16 +67,6 @@ class AuthPostureTests(unittest.TestCase):
     def test_loopback_without_token_starts(self) -> None:
         create_mcp(self._settings(OBSIDIAN_MCP_HOST="127.0.0.1"))
 
-    def test_auth_token_without_public_url_warns(self) -> None:
-        with self.assertLogs("obsidian_mcp.server", level="WARNING") as captured:
-            create_mcp(
-                self._settings(
-                    OBSIDIAN_MCP_HOST="0.0.0.0",
-                    OBSIDIAN_MCP_AUTH_TOKEN="t",
-                )
-            )
-        self.assertTrue(any("OBSIDIAN_MCP_PUBLIC_URL" in line for line in captured.output))
-
 
 class BuildAsgiAppTests(unittest.TestCase):
     def setUp(self) -> None:

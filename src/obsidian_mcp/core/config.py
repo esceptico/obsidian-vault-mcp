@@ -39,7 +39,6 @@ class ServerSettings(BaseSettings):
 
     host: str = Field(default="127.0.0.1")
     port: int = Field(default=8000, ge=0, le=65535)
-    public_url: str | None = Field(default=None)
     auth_token: str | None = Field(default=None)
 
     openai_api_key: SecretStr | None = Field(
@@ -69,10 +68,6 @@ class ServerSettings(BaseSettings):
             dimensions=self.embedding_dimensions,
             batch_size=self.embedding_batch_size,
         )
-
-    @property
-    def resolved_public_url(self) -> str:
-        return (self.public_url or f"http://{self.host}:{self.port}").rstrip("/")
 
 
 def load_settings() -> ServerSettings:
