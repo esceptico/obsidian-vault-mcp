@@ -3,6 +3,7 @@ from typing import Any
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -98,6 +99,12 @@ def create_mcp(settings: ServerSettings | None = None, vault: Vault | None = Non
     _validate_auth_posture(settings)
     if vault is None:
         vault = Vault(settings.vault, settings.embeddings)
+    # DNS rebinding protection: disabled when running behind a tunnel/proxy
+    # (Cloudflare etc.) since the Host header will be the tunnel domain.
+    # BearerAuth middleware provides auth instead.
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    )
     mcp = FastMCP(
         "Obsidian Vault MCP",
         instructions="Headless tools for an Obsidian-flavored Markdown vault.",
@@ -105,6 +112,7 @@ def create_mcp(settings: ServerSettings | None = None, vault: Vault | None = Non
         port=settings.port,
         stateless_http=True,
         json_response=True,
+        transport_security=transport_security,
     )
     _register_tools(mcp, vault)
     return mcp
@@ -221,7 +229,7 @@ def main() -> None:
     vault.start_watching()
     try:
         app = build_asgi_app(settings, mcp)
-        uvicorn.run(app, host=settings.host, port=settings.port)
+        uvicorn.run(app, host=settings.host, port=settings.port, forwarded_allow_ips="*")
     finally:
         vault.stop_watching()
 
