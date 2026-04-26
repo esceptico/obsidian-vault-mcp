@@ -1,5 +1,6 @@
 import os
 import tempfile
+import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -137,6 +138,21 @@ class BuildAsgiAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         allowed = response.headers.get("access-control-allow-headers", "").lower()
         self.assertIn("mcp-protocol-version", allowed)
+
+
+class ToolSchemaTests(unittest.TestCase):
+    def test_nullable_fields_are_not_required_when_defaults_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {"OBSIDIAN_MCP_VAULT_ROOT": tmp}, clear=True):
+                mcp = create_mcp(ServerSettings(_env_file=None))  # type: ignore[call-arg]
+
+            async def list_tools():
+                return await mcp.list_tools()
+
+            tools = {tool.name: tool.inputSchema for tool in asyncio.run(list_tools())}
+
+        self.assertEqual(tools["vault_create_note"]["required"], ["path", "content"])
+        self.assertEqual(tools["vault_update_note"]["required"], ["path"])
 
 
 if __name__ == "__main__":

@@ -38,14 +38,17 @@ class ServerSettings(BaseSettings):
     templates_path: str = Field(default="Templates")
 
     host: str = Field(default="127.0.0.1")
-    port: int = Field(default=8000)
+    port: int = Field(default=8000, ge=0, le=65535)
     public_url: str | None = Field(default=None)
     auth_token: str | None = Field(default=None)
 
-    openai_api_key: SecretStr | None = Field(default=None)
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OBSIDIAN_MCP_OPENAI_API_KEY", "OPENAI_API_KEY"),
+    )
     embedding_model: str = Field(default="text-embedding-3-small")
-    embedding_dimensions: int | None = Field(default=None)
-    embedding_batch_size: int = Field(default=64)
+    embedding_dimensions: int | None = Field(default=None, gt=0)
+    embedding_batch_size: int = Field(default=64, ge=1)
 
     @property
     def vault(self) -> VaultSettings:

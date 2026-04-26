@@ -12,13 +12,19 @@ from obsidian_mcp.constants import (
     EMBEDDING_FALLBACK_ENCODING,
     EMBEDDING_MAX_INPUT_TOKENS,
     EMBEDDING_TIMEOUT_SECONDS,
+    MAX_SEARCH_LIMIT,
     OPENAI_MAX_RETRIES,
+    RRF_CANDIDATE_MULTIPLIER,
     RRF_K,
     SCORE_DECIMALS,
 )
-from obsidian_mcp.frontmatter import split_frontmatter
 from obsidian_mcp.store import FtsHit, RecordMeta, SearchStore, StoredNote, VectorHit
 from obsidian_mcp.types import HitSource, SearchMode
+from obsidian_mcp.logging import get_logger
+from obsidian_mcp.markdown import split_frontmatter
+
+
+log = get_logger("search")
 
 
 @dataclass(frozen=True)
@@ -42,10 +48,16 @@ class SearchIndex:
         record = _stored_note(note)
         rowid = self.store.upsert_note(record)
         if embed and self.embeddings.enabled:
-            self._embed_and_store([(rowid, record)])
+            try:
+                self._embed_and_store([(rowid, record)])
+            except Exception:
+                log.warning("embedding failed for %s; note remains FTS-indexed", note.path)
 
     def delete_note(self, path: str) -> None:
         self.store.delete_note(path)
+
+    def content_hash_for(self, note: IndexedNote) -> str:
+        return _stored_note(note).content_hash
 
     def embed_pending(self) -> int:
         """Embed any indexed records that are missing or stale embeddings.
@@ -65,12 +77,18 @@ class SearchIndex:
         # method is the safety net.
         records_by_rowid = self._materialize_records(pending)
         items = [(rowid, records_by_rowid[rowid]) for rowid, _ in pending if rowid in records_by_rowid]
-        return self._embed_and_store(items)
+        try:
+            return self._embed_and_store(items)
+        except Exception:
+            log.warning("embedding backfill failed; notes remain FTS-indexed")
+            return 0
 
     # --- search -------------------------------------------------------------
 
     def search(self, query: str, limit: int, mode: SearchMode) -> dict:
         mode = SearchMode(mode)
+        if limit < 1 or limit > MAX_SEARCH_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_SEARCH_LIMIT}")
         if not query.strip():
             return {"hits": [], "warnings": []}
         return _SEARCH_DISPATCH[mode](self, query, limit)
@@ -84,12 +102,13 @@ class SearchIndex:
         return {"hits": self._search_vectors(query, limit), "warnings": []}
 
     def _hybrid(self, query: str, limit: int) -> dict:
-        fts_hits = self._search_fts(query, limit)
+        candidate_limit = _candidate_limit(limit)
+        fts_hits = self._search_fts(query, candidate_limit)
         if not self.embeddings.enabled:
-            return {"hits": fts_hits, "warnings": [_VECTOR_DISABLED_WARNING]}
-        vector_hits = self._search_vectors(query, limit)
+            return {"hits": fts_hits[:limit], "warnings": [_VECTOR_DISABLED_WARNING]}
+        vector_hits = self._search_vectors(query, candidate_limit)
         if not vector_hits:
-            return {"hits": fts_hits, "warnings": ["Hybrid search returned SQLite FTS5 results only."]}
+            return {"hits": fts_hits[:limit], "warnings": ["Hybrid search returned SQLite FTS5 results only."]}
         return {"hits": _fuse_hits(fts_hits, vector_hits, limit), "warnings": []}
 
     def _search_fts(self, query: str, limit: int) -> list[dict]:
@@ -104,15 +123,12 @@ class SearchIndex:
 
     # --- embedding helpers --------------------------------------------------
 
-    def _needs_embedding(self, record: StoredNote) -> bool:
-        # The store's upsert_note clears embedded_* on content change, so we
-        # only need to embed when the new record has no embedding row.
-        return True  # caller already gated on enabled; let the store call decide
-
     def _meta_needs_embedding(self, meta: RecordMeta) -> bool:
         if meta.embedded_hash != meta.content_hash:
             return True
         if meta.embedded_model != self.embeddings.model:
+            return True
+        if self.embeddings.dimensions is not None and meta.embedded_dimensions != self.embeddings.dimensions:
             return True
         return False
 
@@ -136,33 +152,7 @@ class SearchIndex:
     def _materialize_records(self, pending: list[tuple[int, RecordMeta]]) -> dict[int, StoredNote]:
         """For records flagged as needing embedding by the meta table alone,
         rehydrate the StoredNote from the FTS row so we have search_text."""
-        rowids = [rowid for rowid, _ in pending]
-        if not rowids:
-            return {}
-        placeholders = ",".join("?" for _ in rowids)
-        with self.store.connect() as conn:
-            rows = conn.execute(
-                f"""
-                SELECT n.rowid AS rowid, n.path, n.title, n.frontmatter,
-                       n.body, n.tags, m.content_hash
-                FROM notes n JOIN note_meta m ON m.rowid = n.rowid
-                WHERE n.rowid IN ({placeholders})
-                """,
-                rowids,
-            ).fetchall()
-        out: dict[int, StoredNote] = {}
-        for row in rows:
-            search_text = f"{row['title']}\n{row['frontmatter']}\n{row['tags']}\n{row['body']}"
-            out[row["rowid"]] = StoredNote(
-                path=row["path"],
-                title=row["title"],
-                frontmatter_json=row["frontmatter"],
-                body=row["body"],
-                tags_text=row["tags"],
-                search_text=search_text,
-                content_hash=row["content_hash"],
-            )
-        return out
+        return self.store.records_by_rowid([rowid for rowid, _ in pending])
 
     def _client(self) -> OpenAI:
         if self._openai_client is None:
@@ -235,6 +225,10 @@ def _truncate_for_embedding(text: str, model: str) -> str:
 def _make_fts_query(query: str) -> str:
     tokens = [token.replace('"', '""') for token in query.split() if token.strip()]
     return " ".join(f'"{token}"' for token in tokens)
+
+
+def _candidate_limit(limit: int) -> int:
+    return min(MAX_SEARCH_LIMIT, max(limit, limit * RRF_CANDIDATE_MULTIPLIER))
 
 
 def _frontmatter_tags(frontmatter: dict) -> list[str]:

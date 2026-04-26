@@ -168,8 +168,8 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     def vault_create_note(
         path: str,
         content: str,
-        frontmatter: dict[str, Any] | None,
-        overwrite: bool,
+        frontmatter: dict[str, Any] | None = None,
+        overwrite: bool = False,
     ) -> dict[str, Any]:
         """Create a Markdown note. Pass `overwrite=true` to replace an existing one."""
         return vault.create_note(path, content, frontmatter, overwrite)
@@ -177,8 +177,8 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     @mcp.tool()
     def vault_update_note(
         path: str,
-        content: str | None,
-        frontmatter_patch: dict[str, Any] | None,
+        content: str | None = None,
+        frontmatter_patch: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Replace a note body and/or patch YAML frontmatter. Null patch values delete keys."""
         return vault.update_note(path, content, frontmatter_patch)
@@ -187,8 +187,8 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     def vault_move_path(
         source: str,
         destination: str,
-        rewrite_links: bool,
-        overwrite: bool,
+        rewrite_links: bool = True,
+        overwrite: bool = False,
     ) -> dict[str, Any]:
         """Move or rename a file/directory, with wikilink rewriting for note renames."""
         return vault.move_path(source, destination, rewrite_links, overwrite)
@@ -196,7 +196,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     @mcp.tool()
     def vault_delete_path(
         path: str,
-        recursive: bool,
+        recursive: bool = False,
         strategy: DeleteStrategy = DeleteStrategy.TRASH,
     ) -> dict[str, Any]:
         """Delete a file or directory. `strategy=trash` (default) preserves the file in .trash/."""

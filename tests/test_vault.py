@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from obsidian_mcp.config import VaultSettings
-from obsidian_mcp.frontmatter import patch_frontmatter, split_frontmatter
+from obsidian_mcp.config import EmbeddingSettings, VaultSettings
+from obsidian_mcp.markdown import patch_frontmatter, split_frontmatter
 from obsidian_mcp.types import DeleteStrategy, SearchMode
 from obsidian_mcp.vault import Vault
 
@@ -67,6 +67,9 @@ class VaultTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 self._create(vault, ".obsidian-mcp/manual", "nope")
+
+            with self.assertRaises(ValueError):
+                self._create(vault, ".trash/manual", "nope")
 
     def test_rename_rewrites_wikilinks(self) -> None:
         tmp, vault = self.make_vault()
@@ -145,6 +148,23 @@ class VaultTests(unittest.TestCase):
         with tmp:
             with self.assertRaises(ValueError):
                 self._create(vault, "Big", "x" * (MAX_NOTE_BYTES + 1))
+
+    def test_create_note_rejects_oversized_rendered_note(self) -> None:
+        from unittest.mock import patch
+
+        tmp, vault = self.make_vault()
+        with tmp, patch("obsidian_mcp.vault.MAX_NOTE_BYTES", 20):
+            with self.assertRaises(ValueError):
+                self._create(vault, "Big", "body", {"long": "x" * 40})
+
+    def test_update_note_rejects_oversized_rendered_note(self) -> None:
+        from unittest.mock import patch
+
+        tmp, vault = self.make_vault()
+        with tmp, patch("obsidian_mcp.vault.MAX_NOTE_BYTES", 40):
+            self._create(vault, "Note", "body")
+            with self.assertRaises(ValueError):
+                vault.update_note("Note.md", content=None, frontmatter_patch={"long": "x" * 80})
 
     def test_sync_from_disk_picks_up_out_of_band_changes(self) -> None:
         """Editing a note directly on disk (e.g. from Obsidian Desktop) goes
@@ -235,6 +255,60 @@ class VaultTests(unittest.TestCase):
             self.assertFalse((Path(tmp.name) / "New.md").exists())
             ref_text = (Path(tmp.name) / "Ref.md").read_text(encoding="utf-8")
             self.assertIn("[[Old]]", ref_text)
+
+    def test_rename_self_linking_note_does_not_recreate_old_path(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            self._create(vault, "Old", "See [[Old]].")
+
+            result = self._move(vault, "Old.md", "New.md")
+
+            self.assertFalse((Path(tmp.name) / "Old.md").exists())
+            self.assertTrue((Path(tmp.name) / "New.md").exists())
+            self.assertEqual(result["rewritten_files"], 1)
+            self.assertIn("[[New]]", vault.read("New.md")["content"])
+
+    def test_overwrite_move_does_not_restore_old_destination_content(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            self._create(vault, "Old", "moved body")
+            self._create(vault, "New", "existing [[Old]]")
+
+            vault.move_path("Old.md", "New.md", rewrite_links=True, overwrite=True)
+
+            self.assertEqual((Path(tmp.name) / "New.md").read_text(encoding="utf-8"), "moved body")
+
+    def test_move_refuses_reserved_trash_path(self) -> None:
+        tmp, vault = self.make_vault()
+        with tmp:
+            self._create(vault, "Note", "body")
+            with self.assertRaises(ValueError):
+                vault.move_path("Note.md", ".trash/Note.md", rewrite_links=True, overwrite=False)
+
+    def test_custom_nested_trash_path_is_reserved(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        with tmp:
+            vault = Vault(VaultSettings(root=Path(tmp.name), trash_path="System/Trash"), embeddings=None)
+            with self.assertRaises(ValueError):
+                self._create(vault, "System/Trash/Note", "body")
+            visible = self._list(vault)
+            self.assertEqual(visible, [])
+
+    def test_embedding_failure_does_not_fail_successful_write(self) -> None:
+        from unittest.mock import patch
+
+        tmp = tempfile.TemporaryDirectory()
+        with tmp:
+            vault = Vault(
+                VaultSettings(root=Path(tmp.name)),
+                EmbeddingSettings(api_key="k", model="text-embedding-3-small"),
+            )
+            with patch.object(vault._index, "_embed_texts", side_effect=RuntimeError("openai down")):
+                result = self._create(vault, "Note", "lexical body")
+
+            self.assertEqual(result["path"], "Note.md")
+            self.assertTrue((Path(tmp.name) / "Note.md").exists())
+            self.assertEqual(self._bm25(vault, "lexical")["hits"][0]["path"], "Note.md")
 
     def test_folder_qualified_wikilinks_are_matched(self) -> None:
         tmp, vault = self.make_vault()

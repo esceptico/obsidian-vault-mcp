@@ -61,6 +61,25 @@ CREATE TABLE IF NOT EXISTS index_meta(
 
 # vec0 virtual table is created lazily once we know the embedding dimension
 # (either from settings or from the first embedding call). See _ensure_vec_table.
+_SELECT_SCHEMA_VERSION = "SELECT value FROM index_meta WHERE key = 'schema_version'"
+_UPSERT_SCHEMA_VERSION = """
+INSERT OR REPLACE INTO index_meta(key, value) VALUES ('schema_version', ?)
+"""
+
+_SELECT_VEC_DIM = "SELECT value FROM index_meta WHERE key = 'vec_dim'"
+_CREATE_VEC_TABLE_TEMPLATE = """
+CREATE VIRTUAL TABLE {if_not_exists} vec_notes USING vec0(
+    embedding float[{dimensions}] distance_metric=cosine
+)
+"""
+_DROP_VEC_TABLE = "DROP TABLE IF EXISTS vec_notes"
+_INVALIDATE_EMBEDDINGS = """
+UPDATE note_meta SET embedded_hash = NULL, embedded_model = NULL,
+                     embedded_dimensions = NULL
+"""
+_UPSERT_VEC_DIM = """
+INSERT OR REPLACE INTO index_meta(key, value) VALUES ('vec_dim', ?)
+"""
 
 _INSERT_NOTE_FTS = """
 INSERT INTO notes(rowid, path, title, frontmatter, body, tags)
@@ -89,6 +108,13 @@ FROM note_meta WHERE path = ?
 _SELECT_ALL_META = """
 SELECT rowid, path, content_hash, embedded_hash, embedded_model, embedded_dimensions
 FROM note_meta
+"""
+
+_SELECT_RECORDS_BY_ROWID_TEMPLATE = """
+SELECT n.rowid AS rowid, n.path, n.title, n.frontmatter,
+       n.body, n.tags, m.content_hash
+FROM notes n JOIN note_meta m ON m.rowid = n.rowid
+WHERE n.rowid IN ({placeholders})
 """
 
 _COUNT_META = "SELECT COUNT(*) FROM note_meta"
@@ -127,12 +153,22 @@ FROM knn
 JOIN note_meta meta ON meta.rowid = knn.rowid
 JOIN notes ON notes.rowid = knn.rowid
 WHERE meta.embedded_model = ?
+  AND meta.embedded_hash = meta.content_hash
   AND (meta.embedded_dimensions IS ? OR meta.embedded_dimensions = ?)
 ORDER BY knn.distance
 """
 
 _INSERT_VEC = "INSERT INTO vec_notes(rowid, embedding) VALUES (?, ?)"
 _DELETE_VEC = "DELETE FROM vec_notes WHERE rowid = ?"
+_SELECT_META_HASH_BY_ROWID = "SELECT content_hash FROM note_meta WHERE rowid = ?"
+_UPDATE_EMBEDDING_META = """
+UPDATE note_meta
+SET embedded_hash = ?, embedded_model = ?, embedded_dimensions = ?
+WHERE rowid = ? AND content_hash = ?
+"""
+_SELECT_VEC_TABLE_EXISTS = """
+SELECT name FROM sqlite_master WHERE type='table' AND name='vec_notes'
+"""
 
 _VECTOR_SNIPPET_CHARS = 240  # chars of body shown alongside vector hits
 
@@ -203,9 +239,7 @@ class SearchStore:
         conn = sqlite3.connect(self.database_path)
         try:
             try:
-                row = conn.execute(
-                    "SELECT value FROM index_meta WHERE key = 'schema_version'"
-                ).fetchone()
+                row = conn.execute(_SELECT_SCHEMA_VERSION).fetchone()
             except sqlite3.OperationalError:
                 row = None  # legacy file: no index_meta table
         finally:
@@ -229,44 +263,28 @@ class SearchStore:
                 ) from exc
             conn.execute(_CREATE_NOTE_META)
             conn.execute(_CREATE_INDEX_META)
-            conn.execute(
-                "INSERT OR REPLACE INTO index_meta(key, value) VALUES ('schema_version', ?)",
-                (str(_SCHEMA_VERSION),),
-            )
+            conn.execute(_UPSERT_SCHEMA_VERSION, (str(_SCHEMA_VERSION),))
 
     def _ensure_vec_table(self, conn: sqlite3.Connection, dimensions: int) -> None:
         """Create or recreate the vec0 table for the given dimension. If a
         previous run used a different dimension, drop the table and clear
         every note's embedded_* fields so the next embed pass repopulates."""
-        stored = conn.execute(
-            "SELECT value FROM index_meta WHERE key = 'vec_dim'"
-        ).fetchone()
+        stored = conn.execute(_SELECT_VEC_DIM).fetchone()
         if stored is None:
             conn.execute(
-                f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_notes USING vec0("
-                f"embedding float[{dimensions}] distance_metric=cosine)"
+                _CREATE_VEC_TABLE_TEMPLATE.format(if_not_exists="IF NOT EXISTS", dimensions=dimensions)
             )
-            conn.execute(
-                "INSERT OR REPLACE INTO index_meta(key, value) VALUES ('vec_dim', ?)",
-                (str(dimensions),),
-            )
+            conn.execute(_UPSERT_VEC_DIM, (str(dimensions),))
             return
         if int(stored["value"]) == dimensions:
             return
         # Dim changed: drop, recreate, invalidate all existing embeddings.
-        conn.execute("DROP TABLE IF EXISTS vec_notes")
+        conn.execute(_DROP_VEC_TABLE)
         conn.execute(
-            f"CREATE VIRTUAL TABLE vec_notes USING vec0("
-            f"embedding float[{dimensions}] distance_metric=cosine)"
+            _CREATE_VEC_TABLE_TEMPLATE.format(if_not_exists="", dimensions=dimensions)
         )
-        conn.execute(
-            "UPDATE note_meta SET embedded_hash = NULL, embedded_model = NULL, "
-            "embedded_dimensions = NULL"
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO index_meta(key, value) VALUES ('vec_dim', ?)",
-            (str(dimensions),),
-        )
+        conn.execute(_INVALIDATE_EMBEDDINGS)
+        conn.execute(_UPSERT_VEC_DIM, (str(dimensions),))
 
     # ----- note CRUD --------------------------------------------------------
 
@@ -331,6 +349,27 @@ class SearchStore:
         with self.connect() as conn:
             return conn.execute(_COUNT_META).fetchone()[0]
 
+    def records_by_rowid(self, rowids: list[int]) -> dict[int, StoredNote]:
+        if not rowids:
+            return {}
+        placeholders = ",".join("?" for _ in rowids)
+        query = _SELECT_RECORDS_BY_ROWID_TEMPLATE.format(placeholders=placeholders)
+        with self.connect() as conn:
+            rows = conn.execute(query, rowids).fetchall()
+        out: dict[int, StoredNote] = {}
+        for row in rows:
+            search_text = f"{row['title']}\n{row['frontmatter']}\n{row['tags']}\n{row['body']}"
+            out[row["rowid"]] = StoredNote(
+                path=row["path"],
+                title=row["title"],
+                frontmatter_json=row["frontmatter"],
+                body=row["body"],
+                tags_text=row["tags"],
+                search_text=search_text,
+                content_hash=row["content_hash"],
+            )
+        return out
+
     # ----- search -----------------------------------------------------------
 
     def search_fts(self, query: str, limit: int) -> list[FtsHit]:
@@ -392,12 +431,14 @@ class SearchStore:
                     raise ValueError(
                         f"vector for rowid={rowid} has dim {len(vector)}, expected {dimensions}"
                     )
+                current = conn.execute(_SELECT_META_HASH_BY_ROWID, (rowid,)).fetchone()
+                if current is None or current["content_hash"] != content_hash:
+                    continue
                 self._delete_vec_if_present(conn, rowid)
                 conn.execute(_INSERT_VEC, (rowid, _serialize(vector)))
                 conn.execute(
-                    "UPDATE note_meta SET embedded_hash = ?, embedded_model = ?, "
-                    "embedded_dimensions = ? WHERE rowid = ?",
-                    (content_hash, model, dimensions, rowid),
+                    _UPDATE_EMBEDDING_META,
+                    (content_hash, model, dimensions, rowid, content_hash),
                 )
 
     # ----- helpers ----------------------------------------------------------
@@ -411,9 +452,7 @@ class SearchStore:
         if conn is None:
             with self.connect() as inner:
                 return self._vec_table_exists(inner)
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='vec_notes'"
-        ).fetchone()
+        row = conn.execute(_SELECT_VEC_TABLE_EXISTS).fetchone()
         return row is not None
 
     def connect(self) -> sqlite3.Connection:

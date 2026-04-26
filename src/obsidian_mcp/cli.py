@@ -26,7 +26,7 @@ def main(args: argparse.Namespace | None = None) -> None:
         # CLI flags take precedence; ServerSettings reads OBSIDIAN_MCP_* from env/.env.
         if args.host:
             os.environ["OBSIDIAN_MCP_HOST"] = args.host
-        if args.port:
+        if args.port is not None:
             os.environ["OBSIDIAN_MCP_PORT"] = str(args.port)
         from obsidian_mcp.logging import configure_default_logging
         from obsidian_mcp.server import main as serve_main

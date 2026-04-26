@@ -74,6 +74,33 @@ class SearchTests(unittest.TestCase):
                 count = index.embed_pending()
             self.assertEqual(count, 1)
 
+    def test_embed_pending_rebuilds_when_dimensions_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            database = Path(tmp) / "i.sqlite"
+            index = SearchIndex(
+                database,
+                EmbeddingSettings(api_key="k", model="text-embedding-3-small", dimensions=2),
+            )
+            with patch.object(index, "_embed_texts", return_value=[[1.0, 0.0]]):
+                index.upsert_note(IndexedNote(path="A.md", content="semantic note"))
+
+            index = SearchIndex(
+                database,
+                EmbeddingSettings(api_key="k", model="text-embedding-3-small", dimensions=3),
+            )
+            with patch.object(index, "_embed_texts", side_effect=[[[1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0]]]):
+                self.assertEqual(index.embed_pending(), 1)
+                hits = index.search("semantic", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR)["hits"]
+
+            self.assertEqual(hits[0]["path"], "A.md")
+
+    def test_invalid_search_limit_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            index = SearchIndex(Path(tmp) / "i.sqlite", EmbeddingSettings())
+            index.upsert_note(IndexedNote(path="A.md", content="alpha"))
+            with self.assertRaises(ValueError):
+                index.search("alpha", limit=-1, mode=SearchMode.BM25)
+
 
 if __name__ == "__main__":
     unittest.main()

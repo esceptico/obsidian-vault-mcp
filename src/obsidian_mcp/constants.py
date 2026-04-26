@@ -14,12 +14,18 @@ TRASH_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 DEFAULT_SEARCH_LIMIT = 10
 """Number of hits returned by vault_search when the client doesn't specify."""
 
+MAX_SEARCH_LIMIT = 100
+"""Largest search limit accepted from MCP/CLI callers."""
+
 SCORE_DECIMALS = 6
 """Decimal places retained when rounding search scores (FTS, vector, hybrid)."""
 
 RRF_K = 60
 """Reciprocal-rank-fusion constant; standard literature value used to combine
 FTS and vector ranks in hybrid search."""
+
+RRF_CANDIDATE_MULTIPLIER = 5
+"""How many more candidates each backend retrieves before final RRF trimming."""
 
 FTS_SNIPPET_LENGTH = 32
 """Token count for the snippet column returned by FTS5 snippet()."""

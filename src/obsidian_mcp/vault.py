@@ -11,17 +11,22 @@ from obsidian_mcp.config import EmbeddingSettings, VaultSettings
 from obsidian_mcp.constants import (
     MAX_FRONTMATTER_DEPTH,
     MAX_NOTE_BYTES,
+    MAX_SEARCH_LIMIT,
     TRASH_TIMESTAMP_FORMAT,
     WATCHER_DEBOUNCE_SECONDS,
 )
-from obsidian_mcp.frontmatter import (
+from obsidian_mcp.markdown import (
+    block_ids,
+    inline_tags,
+    markdown_links,
     patch_frontmatter,
     render_frontmatter,
     split_frontmatter,
     split_frontmatter_raw,
+    rewrite_wikilink_targets,
+    wikilinks,
 )
 from obsidian_mcp.logging import get_logger
-from obsidian_mcp.obsidian import block_ids, inline_tags, markdown_links, rewrite_wikilink_targets, wikilinks
 from obsidian_mcp.search import IndexedNote, SearchIndex
 from obsidian_mcp.types import DeleteStrategy, EntryKind, SearchMode
 from obsidian_mcp.watcher import VaultWatcher
@@ -152,6 +157,7 @@ class Vault:
                 raise FileExistsError(f"Refusing to overwrite existing note: {path}")
             note_path.parent.mkdir(parents=True, exist_ok=True)
             rendered = render_frontmatter(frontmatter or {}, content)
+            _check_size(rendered)
             self._atomic_write(note_path, rendered)
             rel = self.relative(note_path)
             self._index.upsert_note(IndexedNote(path=rel, content=rendered))
@@ -180,6 +186,7 @@ class Vault:
                 next_content = render_frontmatter(current_frontmatter, content)
             if frontmatter_patch:
                 next_content = patch_frontmatter(next_content, frontmatter_patch)
+            _check_size(next_content)
             changed = next_content != existing
             if changed:
                 self._atomic_write(note_path, next_content)
@@ -241,9 +248,17 @@ class Vault:
 
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
+        applied_rewrites: list[tuple[Path, str]] = []
         try:
             for path, new_content in pending_rewrites:
-                self._atomic_write(path, new_content)
+                if path.resolve() == src.resolve():
+                    write_path = dst
+                elif overwrite and path.resolve() == dst.resolve():
+                    continue
+                else:
+                    write_path = path
+                self._atomic_write(write_path, new_content)
+                applied_rewrites.append((write_path, new_content))
         except BaseException:
             try:
                 shutil.move(str(dst), str(src))
@@ -257,7 +272,7 @@ class Vault:
             self._index.upsert_note(
                 IndexedNote(path=self.relative(dst), content=dst.read_text(encoding="utf-8"))
             )
-        for path, content in pending_rewrites:
+        for path, content in applied_rewrites:
             self._index.upsert_note(IndexedNote(path=self.relative(path), content=content))
 
         log.info(
@@ -268,7 +283,7 @@ class Vault:
             "ok": True,
             "source": original_source,
             "destination": self.relative(dst),
-            "rewritten_files": len(pending_rewrites),
+            "rewritten_files": len(applied_rewrites),
         }
 
     def delete_path(self, path: str, recursive: bool, strategy: DeleteStrategy) -> dict[str, Any]:
@@ -308,7 +323,7 @@ class Vault:
         return []
 
     def _delete_to_trash(self, path: str, target: Path) -> dict[str, Any]:
-        trash = self.resolve_for_write(self.settings.trash_path)
+        trash = self._trash_dir()
         trash.mkdir(parents=True, exist_ok=True)
         destination = self._unique_trash_destination(trash, target.name)
         shutil.move(str(target), str(destination))
@@ -322,6 +337,8 @@ class Vault:
         return {"ok": True, "path": path, "deleted": True}
 
     def search(self, query: str, limit: int, mode: SearchMode) -> dict[str, Any]:
+        if limit < 1 or limit > MAX_SEARCH_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_SEARCH_LIMIT}")
         return self._index.search(query=query, limit=limit, mode=SearchMode(mode))
 
     def sync_from_disk(self) -> dict[str, int]:
@@ -344,8 +361,6 @@ class Vault:
             indexed = self._index.store.all_records()
             added = modified = unchanged = removed = 0
 
-            from obsidian_mcp.search import _stored_note
-
             for rel, content in on_disk.items():
                 note = IndexedNote(path=rel, content=content)
                 if rel not in indexed:
@@ -353,8 +368,7 @@ class Vault:
                     added += 1
                     continue
                 # Skip the upsert entirely when content hasn't changed.
-                record = _stored_note(note)
-                if record.content_hash == indexed[rel].content_hash:
+                if self._index.content_hash_for(note) == indexed[rel].content_hash:
                     unchanged += 1
                 else:
                     self._index.upsert_note(note, embed=False)
@@ -406,8 +420,8 @@ class Vault:
 
     def resolve_for_write(self, path: str) -> Path:
         clean = _clean_relative_path(path)
-        if _is_internal_path(clean):
-            raise ValueError("Path points to internal obsidian-mcp storage")
+        if self._is_reserved_relative_path(clean):
+            raise ValueError("Path points to reserved obsidian-mcp storage")
         candidate = self.root / clean
         parent = candidate.parent.resolve()
         self._ensure_inside_root(parent)
@@ -453,8 +467,19 @@ class Vault:
         return names
 
     def _is_ignored_path(self, path: Path) -> bool:
-        parts = path.relative_to(self.root).parts
-        return bool(parts) and parts[0] in {self.settings.trash_path, ".obsidian-mcp"}
+        return self._is_reserved_relative_path(path.relative_to(self.root))
+
+    def _is_reserved_relative_path(self, path: Path) -> bool:
+        return _is_relative_to(path, _clean_relative_path(self.settings.trash_path)) or _is_relative_to(
+            path, Path(".obsidian-mcp")
+        )
+
+    def _trash_dir(self) -> Path:
+        clean = _clean_relative_path(self.settings.trash_path)
+        candidate = self.root / clean
+        resolved_parent = candidate.parent.resolve()
+        self._ensure_inside_root(resolved_parent)
+        return resolved_parent / candidate.name
 
     def _atomic_write(self, path: Path, content: str) -> None:
         tmp = _tmp_name_for(path)
@@ -488,12 +513,18 @@ def _clean_relative_path(path: str) -> Path:
     return candidate
 
 
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    if parent == Path():
+        return False
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def _ensure_md(path: str) -> str:
     return path if Path(path).suffix else f"{path}.md"
-
-
-def _is_internal_path(path: Path) -> bool:
-    return ".obsidian-mcp" in path.parts
 
 
 def _frontmatter_tags(frontmatter: dict[str, Any]) -> list[str]:
