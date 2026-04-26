@@ -9,8 +9,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from obsidian_mcp.config import ServerSettings
-from obsidian_mcp.server import BearerAuthMiddleware, build_asgi_app, create_mcp
+from obsidian_mcp.core.config import ServerSettings
+from obsidian_mcp.transport.http import BearerAuthMiddleware, build_asgi_app, create_mcp
 
 
 def _make_inner_app() -> Starlette:

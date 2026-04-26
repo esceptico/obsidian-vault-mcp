@@ -49,6 +49,15 @@ For remote access, put the server behind HTTPS and keep `OBSIDIAN_MCP_AUTH_TOKEN
 - `vault_backlinks`
 - `vault_reindex`
 
+## Project Layout
+
+- `obsidian_mcp.app`: CLI entrypoints
+- `obsidian_mcp.core`: settings, constants, logging, shared enums
+- `obsidian_mcp.index`: FTS/vector indexing and SQLite persistence
+- `obsidian_mcp.markdown`: Obsidian-flavored Markdown parsing and rewriting
+- `obsidian_mcp.transport`: HTTP MCP transport
+- `obsidian_mcp.vault`: safe filesystem operations and file watching
+
 ## Notes
 
 `vault_search(mode="hybrid")` combines SQLite FTS5 and OpenAI embeddings when `OPENAI_API_KEY` or `OBSIDIAN_MCP_OPENAI_API_KEY` is set. Without an API key, hybrid search falls back to FTS5 and returns a warning.

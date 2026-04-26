@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-obsidian-mcp = "obsidian_mcp.cli:main"
+obsidian-mcp = "obsidian_mcp.app.cli:main"
 
 [build-system]
 requires = ["hatchling"]

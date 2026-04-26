@@ -3,9 +3,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from obsidian_mcp.config import EmbeddingSettings
-from obsidian_mcp.search import IndexedNote, SearchIndex
-from obsidian_mcp.types import SearchMode
+from obsidian_mcp.core.config import EmbeddingSettings
+from obsidian_mcp.core.types import SearchMode
+from obsidian_mcp.index import IndexedNote, SearchIndex
 
 DEFAULT_LIMIT = 10
 

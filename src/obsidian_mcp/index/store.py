@@ -6,7 +6,7 @@ from typing import Iterable
 
 import sqlite_vec
 
-from obsidian_mcp.constants import FTS_SNIPPET_LENGTH
+from obsidian_mcp.core.constants import FTS_SNIPPET_LENGTH
 
 # --- FTS5 snippet config ----------------------------------------------------
 _SNIPPET_TARGET_COLUMN = 3  # 0-indexed: path, title, frontmatter, body

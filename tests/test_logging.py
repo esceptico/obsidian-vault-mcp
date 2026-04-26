@@ -1,7 +1,7 @@
 import logging
 import unittest
 
-from obsidian_mcp.logging import get_logger
+from obsidian_mcp.core.logging import get_logger
 
 
 class LoggingTests(unittest.TestCase):

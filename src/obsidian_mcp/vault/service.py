@@ -1,5 +1,4 @@
 import os
-import secrets
 import shutil
 import threading
 from dataclasses import dataclass
@@ -7,8 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from obsidian_mcp.config import EmbeddingSettings, VaultSettings
-from obsidian_mcp.constants import (
+from obsidian_mcp.core.config import EmbeddingSettings, VaultSettings
+from obsidian_mcp.core.constants import (
     MAX_FRONTMATTER_DEPTH,
     MAX_NOTE_BYTES,
     MAX_SEARCH_LIMIT,
@@ -17,6 +16,7 @@ from obsidian_mcp.constants import (
 )
 from obsidian_mcp.markdown import (
     block_ids,
+    frontmatter_tags,
     inline_tags,
     markdown_links,
     patch_frontmatter,
@@ -26,10 +26,16 @@ from obsidian_mcp.markdown import (
     rewrite_wikilink_targets,
     wikilinks,
 )
-from obsidian_mcp.logging import get_logger
-from obsidian_mcp.search import IndexedNote, SearchIndex
-from obsidian_mcp.types import DeleteStrategy, EntryKind, SearchMode
-from obsidian_mcp.watcher import VaultWatcher
+from obsidian_mcp.core.logging import get_logger
+from obsidian_mcp.core.types import DeleteStrategy, EntryKind, SearchMode
+from obsidian_mcp.index import IndexedNote, SearchIndex
+from obsidian_mcp.vault.paths import (
+    clean_relative_path,
+    ensure_markdown_extension,
+    is_relative_to,
+    temporary_write_path,
+)
+from obsidian_mcp.vault.watcher import VaultWatcher
 
 log = get_logger("vault")
 
@@ -138,7 +144,7 @@ class Vault:
             "content": content,
             "wikilinks": [link.__dict__ for link in wikilinks(body)],
             "markdown_links": markdown_links(body),
-            "tags": sorted(set(_frontmatter_tags(frontmatter) + inline_tags(body))),
+            "tags": sorted(set(frontmatter_tags(frontmatter) + inline_tags(body))),
             "block_ids": block_ids(body),
         }
 
@@ -152,7 +158,7 @@ class Vault:
         _check_size(content)
         _check_frontmatter_depth(frontmatter or {})
         with self._lock:
-            note_path = self.resolve_for_write(_ensure_md(path))
+            note_path = self.resolve_for_write(ensure_markdown_extension(path))
             if note_path.exists() and not overwrite:
                 raise FileExistsError(f"Refusing to overwrite existing note: {path}")
             note_path.parent.mkdir(parents=True, exist_ok=True)
@@ -413,13 +419,13 @@ class Vault:
         return self.sync_from_disk()
 
     def resolve(self, path: str) -> Path:
-        clean = _clean_relative_path(path)
+        clean = clean_relative_path(path)
         resolved = (self.root / clean).resolve()
         self._ensure_inside_root(resolved)
         return resolved
 
     def resolve_for_write(self, path: str) -> Path:
-        clean = _clean_relative_path(path)
+        clean = clean_relative_path(path)
         if self._is_reserved_relative_path(clean):
             raise ValueError("Path points to reserved obsidian-mcp storage")
         candidate = self.root / clean
@@ -470,19 +476,19 @@ class Vault:
         return self._is_reserved_relative_path(path.relative_to(self.root))
 
     def _is_reserved_relative_path(self, path: Path) -> bool:
-        return _is_relative_to(path, _clean_relative_path(self.settings.trash_path)) or _is_relative_to(
+        return is_relative_to(path, clean_relative_path(self.settings.trash_path)) or is_relative_to(
             path, Path(".obsidian-mcp")
         )
 
     def _trash_dir(self) -> Path:
-        clean = _clean_relative_path(self.settings.trash_path)
+        clean = clean_relative_path(self.settings.trash_path)
         candidate = self.root / clean
         resolved_parent = candidate.parent.resolve()
         self._ensure_inside_root(resolved_parent)
         return resolved_parent / candidate.name
 
     def _atomic_write(self, path: Path, content: str) -> None:
-        tmp = _tmp_name_for(path)
+        tmp = temporary_write_path(path)
         try:
             with open(tmp, "w", encoding="utf-8") as fh:
                 fh.write(content)
@@ -496,44 +502,6 @@ class Vault:
                 except OSError:
                     pass
             raise
-
-
-def _tmp_name_for(path: Path) -> Path:
-    return path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
-
-
-def _clean_relative_path(path: str) -> Path:
-    if not path or path == ".":
-        return Path()
-    candidate = Path(path)
-    if candidate.is_absolute():
-        raise ValueError("Vault paths must be relative")
-    if any(part in {"..", ""} for part in candidate.parts):
-        raise ValueError("Vault path contains unsafe segments")
-    return candidate
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    if parent == Path():
-        return False
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def _ensure_md(path: str) -> str:
-    return path if Path(path).suffix else f"{path}.md"
-
-
-def _frontmatter_tags(frontmatter: dict[str, Any]) -> list[str]:
-    tags = frontmatter.get("tags", [])
-    if isinstance(tags, str):
-        return [tags.lstrip("#")]
-    if isinstance(tags, list):
-        return [str(tag).lstrip("#") for tag in tags]
-    return []
 
 
 def _check_size(content: str) -> None:

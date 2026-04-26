@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from obsidian_mcp.cli import main
+from obsidian_mcp.app.cli import main
 
 
 class CliTests(unittest.TestCase):
@@ -11,8 +11,8 @@ class CliTests(unittest.TestCase):
         args = argparse.Namespace(command="serve", host=None, port=0)
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch("obsidian_mcp.logging.configure_default_logging"),
-            patch("obsidian_mcp.server.main") as serve_main,
+            patch("obsidian_mcp.core.logging.configure_default_logging"),
+            patch("obsidian_mcp.transport.http.main") as serve_main,
         ):
             main(args)
             self.assertEqual(os.environ["OBSIDIAN_MCP_PORT"], "0")

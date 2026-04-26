@@ -6,10 +6,10 @@ from mcp.server.fastmcp import FastMCP
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from obsidian_mcp.config import ServerSettings, load_settings
-from obsidian_mcp.constants import DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS
-from obsidian_mcp.logging import get_logger
-from obsidian_mcp.types import DeleteStrategy, SearchMode
+from obsidian_mcp.core.config import ServerSettings, load_settings
+from obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS
+from obsidian_mcp.core.logging import get_logger
+from obsidian_mcp.core.types import DeleteStrategy, SearchMode
 from obsidian_mcp.vault import Vault
 
 log = get_logger("server")

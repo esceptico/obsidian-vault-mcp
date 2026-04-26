@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from obsidian_mcp.config import ServerSettings
+from obsidian_mcp.core.config import ServerSettings
 
 
 class ConfigTests(unittest.TestCase):

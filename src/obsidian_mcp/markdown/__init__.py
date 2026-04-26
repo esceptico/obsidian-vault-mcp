@@ -131,6 +131,15 @@ def block_ids(markdown: str) -> list[str]:
     return sorted(set(BLOCK_ID_RE.findall(markdown)))
 
 
+def frontmatter_tags(frontmatter: dict[str, Any]) -> list[str]:
+    tags = frontmatter.get("tags", [])
+    if isinstance(tags, str):
+        return [tags.lstrip("#")]
+    if isinstance(tags, list):
+        return [str(tag).lstrip("#") for tag in tags]
+    return []
+
+
 def rewrite_wikilink_targets(
     markdown: str,
     old_names: set[str],

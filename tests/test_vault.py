@@ -2,9 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from obsidian_mcp.config import EmbeddingSettings, VaultSettings
+from obsidian_mcp.core.config import EmbeddingSettings, VaultSettings
 from obsidian_mcp.markdown import patch_frontmatter, split_frontmatter
-from obsidian_mcp.types import DeleteStrategy, SearchMode
+from obsidian_mcp.core.types import DeleteStrategy, SearchMode
 from obsidian_mcp.vault import Vault
 
 
@@ -126,7 +126,7 @@ class VaultTests(unittest.TestCase):
                 def fromtimestamp(ts, tz=None):
                     return datetime.fromtimestamp(ts, tz)
 
-            with patch("obsidian_mcp.vault.datetime", FrozenDateTime):
+            with patch("obsidian_mcp.vault.service.datetime", FrozenDateTime):
                 r1 = self._trash(vault, "A.md")
                 self._create(vault, "A", "second")
                 r2 = self._trash(vault, "A.md")
@@ -142,7 +142,7 @@ class VaultTests(unittest.TestCase):
                 vault.backlinks("does-not-exist.md")
 
     def test_create_note_rejects_oversized_content(self) -> None:
-        from obsidian_mcp.constants import MAX_NOTE_BYTES
+        from obsidian_mcp.core.constants import MAX_NOTE_BYTES
 
         tmp, vault = self.make_vault()
         with tmp:
@@ -153,7 +153,7 @@ class VaultTests(unittest.TestCase):
         from unittest.mock import patch
 
         tmp, vault = self.make_vault()
-        with tmp, patch("obsidian_mcp.vault.MAX_NOTE_BYTES", 20):
+        with tmp, patch("obsidian_mcp.vault.service.MAX_NOTE_BYTES", 20):
             with self.assertRaises(ValueError):
                 self._create(vault, "Big", "body", {"long": "x" * 40})
 
@@ -161,7 +161,7 @@ class VaultTests(unittest.TestCase):
         from unittest.mock import patch
 
         tmp, vault = self.make_vault()
-        with tmp, patch("obsidian_mcp.vault.MAX_NOTE_BYTES", 40):
+        with tmp, patch("obsidian_mcp.vault.service.MAX_NOTE_BYTES", 40):
             self._create(vault, "Note", "body")
             with self.assertRaises(ValueError):
                 vault.update_note("Note.md", content=None, frontmatter_patch={"long": "x" * 80})
@@ -209,14 +209,14 @@ class VaultTests(unittest.TestCase):
                 called["count"] = called.get("count", 0) + 1
                 return real_fsync(fd)
 
-            with patch("obsidian_mcp.vault.os.fsync", side_effect=spy_fsync):
+            with patch("obsidian_mcp.vault.service.os.fsync", side_effect=spy_fsync):
                 self._create(vault, "Note", "hello")
 
             self.assertGreaterEqual(called.get("count", 0), 1)
 
-            from obsidian_mcp.vault import _tmp_name_for
-            a = _tmp_name_for(Path(tmp.name) / "X.md")
-            b = _tmp_name_for(Path(tmp.name) / "X.md")
+            from obsidian_mcp.vault.paths import temporary_write_path
+            a = temporary_write_path(Path(tmp.name) / "X.md")
+            b = temporary_write_path(Path(tmp.name) / "X.md")
             self.assertNotEqual(a.name, b.name)
 
     def test_rename_preserves_folder_qualifier_on_collision(self) -> None:

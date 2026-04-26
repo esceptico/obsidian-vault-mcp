@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from threading import Event
 
-from obsidian_mcp.watcher import VaultWatcher
+from obsidian_mcp.vault.watcher import VaultWatcher
 
 # Watcher tests poll for FS events; give the OS a real (small) timeout
 # rather than guess timing. Total per test stays well under a second.

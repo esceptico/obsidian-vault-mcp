@@ -7,8 +7,8 @@ from pathlib import Path
 import tiktoken
 from openai import OpenAI
 
-from obsidian_mcp.config import EmbeddingSettings
-from obsidian_mcp.constants import (
+from obsidian_mcp.core.config import EmbeddingSettings
+from obsidian_mcp.core.constants import (
     EMBEDDING_FALLBACK_ENCODING,
     EMBEDDING_MAX_INPUT_TOKENS,
     EMBEDDING_TIMEOUT_SECONDS,
@@ -18,10 +18,10 @@ from obsidian_mcp.constants import (
     RRF_K,
     SCORE_DECIMALS,
 )
-from obsidian_mcp.store import FtsHit, RecordMeta, SearchStore, StoredNote, VectorHit
-from obsidian_mcp.types import HitSource, SearchMode
-from obsidian_mcp.logging import get_logger
-from obsidian_mcp.markdown import split_frontmatter
+from obsidian_mcp.core.types import HitSource, SearchMode
+from obsidian_mcp.core.logging import get_logger
+from obsidian_mcp.index.store import FtsHit, RecordMeta, SearchStore, StoredNote, VectorHit
+from obsidian_mcp.markdown import frontmatter_tags, split_frontmatter
 
 
 log = get_logger("search")
@@ -190,7 +190,7 @@ def _stored_note(note: IndexedNote) -> StoredNote:
     frontmatter, body = split_frontmatter(note.content)
     title = str(frontmatter.get("title") or Path(note.path).stem)
     frontmatter_json = json.dumps(frontmatter, ensure_ascii=False, sort_keys=True)
-    tags_text = " ".join(_frontmatter_tags(frontmatter))
+    tags_text = " ".join(frontmatter_tags(frontmatter))
     search_text = f"{title}\n{frontmatter_json}\n{tags_text}\n{body}"
     return StoredNote(
         path=note.path,
@@ -229,15 +229,6 @@ def _make_fts_query(query: str) -> str:
 
 def _candidate_limit(limit: int) -> int:
     return min(MAX_SEARCH_LIMIT, max(limit, limit * RRF_CANDIDATE_MULTIPLIER))
-
-
-def _frontmatter_tags(frontmatter: dict) -> list[str]:
-    tags = frontmatter.get("tags", [])
-    if isinstance(tags, str):
-        return [tags.lstrip("#")]
-    if isinstance(tags, list):
-        return [str(tag).lstrip("#") for tag in tags]
-    return []
 
 
 def _fts_hit_to_dict(hit: FtsHit) -> dict:

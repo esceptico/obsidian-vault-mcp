@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from obsidian_mcp.store import SearchStore, StoredNote
+from obsidian_mcp.index.store import SearchStore, StoredNote
 
 
 def _note(**overrides) -> StoredNote:

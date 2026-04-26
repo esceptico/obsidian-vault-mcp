@@ -1,9 +1,9 @@
 import argparse
 import os
 
-from obsidian_mcp.config import load_settings
-from obsidian_mcp.constants import DEFAULT_SEARCH_LIMIT
-from obsidian_mcp.types import SearchMode
+from obsidian_mcp.core.config import load_settings
+from obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT
+from obsidian_mcp.core.types import SearchMode
 from obsidian_mcp.vault import Vault
 
 
@@ -28,8 +28,8 @@ def main(args: argparse.Namespace | None = None) -> None:
             os.environ["OBSIDIAN_MCP_HOST"] = args.host
         if args.port is not None:
             os.environ["OBSIDIAN_MCP_PORT"] = str(args.port)
-        from obsidian_mcp.logging import configure_default_logging
-        from obsidian_mcp.server import main as serve_main
+        from obsidian_mcp.core.logging import configure_default_logging
+        from obsidian_mcp.transport.http import main as serve_main
 
         configure_default_logging()
         serve_main()
