@@ -8,6 +8,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from obsidian_mcp.core.config import load_settings
+
 
 STOP_TIMEOUT_SECONDS = 10.0
 START_TIMEOUT_SECONDS = 10.0
@@ -32,7 +34,8 @@ def daemon_paths() -> DaemonPaths:
 
 
 def start_daemon(host: str | None, port: int | None, timeout: float = START_TIMEOUT_SECONDS) -> int:
-    if port == 0:
+    health_host, health_port = _effective_endpoint(host, port)
+    if health_port == 0:
         raise ValueError("start does not support --port 0 because the health port cannot be discovered")
     paths = daemon_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
@@ -61,7 +64,7 @@ def start_daemon(host: str | None, port: int | None, timeout: float = START_TIME
 
     write_pid(paths.pid_file, process.pid)
     try:
-        if not wait_for_health(_health_host(host or os.environ.get("OBSIDIAN_MCP_HOST", "127.0.0.1")), port or _env_port(), timeout):
+        if not wait_for_health(_health_host(health_host), health_port, timeout):
             stop_pid(process.pid, timeout=2.0)
             remove_pid(paths.pid_file)
             raise RuntimeError(f"server did not become healthy within {timeout:g}s; see {paths.log_file}")
@@ -95,7 +98,8 @@ def daemon_status(host: str | None, port: int | None) -> str:
     if not is_process_alive(pid):
         remove_pid(paths.pid_file)
         return f"stopped (stale pid {pid})"
-    healthy = check_health(_health_host(host or os.environ.get("OBSIDIAN_MCP_HOST", "127.0.0.1")), port or _env_port())
+    health_host, health_port = _effective_endpoint(host, port)
+    healthy = check_health(_health_host(health_host), health_port)
     return f"running, pid={pid}, {'healthy' if healthy else 'unhealthy'}"
 
 
@@ -180,11 +184,12 @@ def check_health(host: str, port: int) -> bool:
         return False
 
 
-def _env_port() -> int:
-    return int(os.environ.get("OBSIDIAN_MCP_PORT", "8000"))
-
-
 def _health_host(host: str) -> str:
     if host in {"0.0.0.0", "::"}:
         return "127.0.0.1"
     return host
+
+
+def _effective_endpoint(host: str | None, port: int | None) -> tuple[str, int]:
+    settings = load_settings()
+    return host or settings.host, port if port is not None else settings.port

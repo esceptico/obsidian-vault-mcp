@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -56,6 +57,21 @@ class DaemonTests(unittest.TestCase):
 
             self.assertEqual(pid, 456)
             self.assertEqual(read_pid(paths.pid_file), 456)
+
+    def test_start_health_uses_effective_settings_port(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = DaemonPaths(Path(tmp), Path(tmp) / "server.pid", Path(tmp) / "server.log")
+            process = Mock(pid=456)
+            settings = SimpleNamespace(host="127.0.0.1", port=8008)
+            with (
+                patch("obsidian_mcp.app.daemon.daemon_paths", return_value=paths),
+                patch("obsidian_mcp.app.daemon.load_settings", return_value=settings),
+                patch("obsidian_mcp.app.daemon.subprocess.Popen", return_value=process),
+                patch("obsidian_mcp.app.daemon.wait_for_health", return_value=True) as wait,
+            ):
+                start_daemon(None, None)
+
+            wait.assert_called_once_with("127.0.0.1", 8008, 10.0)
 
     def test_start_rejects_ephemeral_port(self) -> None:
         with self.assertRaises(ValueError):
