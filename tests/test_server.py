@@ -2,6 +2,7 @@ import os
 import tempfile
 import asyncio
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from starlette.applications import Starlette
@@ -184,6 +185,58 @@ class ToolSchemaTests(unittest.TestCase):
             self.assertTrue(annotations.destructiveHint, name)
             self.assertEqual(annotations.idempotentHint, idempotent, name)
             self.assertFalse(annotations.openWorldHint, name)
+
+
+class ToolResultTests(unittest.TestCase):
+    def _mcp(self, tmp: str):
+        with patch.dict(os.environ, {"OBSIDIAN_MCP_VAULT_ROOT": tmp}, clear=True):
+            return create_mcp(ServerSettings(_env_file=None))  # type: ignore[call-arg]
+
+    def test_search_returns_markdown_content_and_structured_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "Note.md").write_text("semantic search body", encoding="utf-8")
+            mcp = self._mcp(tmp)
+
+            async def call_search():
+                return await mcp.call_tool("vault_search", {"query": "semantic", "mode": "bm25"})
+
+            result = asyncio.run(call_search())
+
+        self.assertEqual(result.content[0].type, "text")
+        self.assertIn("Found 1 matches", result.content[0].text)
+        self.assertIn("`Note.md`", result.content[0].text)
+        self.assertEqual(result.structuredContent["query"], "semantic")
+        self.assertEqual(result.structuredContent["mode"], "bm25")
+        self.assertEqual(result.structuredContent["hits"][0]["path"], "Note.md")
+
+    def test_list_wraps_entries_for_structured_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "Alpha.md").write_text("alpha", encoding="utf-8")
+            mcp = self._mcp(tmp)
+
+            async def call_list():
+                return await mcp.call_tool("vault_list", {"path": ""})
+
+            result = asyncio.run(call_list())
+
+        self.assertIn("Found 1 entries", result.content[0].text)
+        self.assertEqual(result.structuredContent["path"], "")
+        self.assertEqual(result.structuredContent["entries"][0]["path"], "Alpha.md")
+
+    def test_read_returns_note_markdown_and_structured_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "Alpha.md").write_text("---\ntags: [project]\n---\nBody", encoding="utf-8")
+            mcp = self._mcp(tmp)
+
+            async def call_read():
+                return await mcp.call_tool("vault_read", {"path": "Alpha.md"})
+
+            result = asyncio.run(call_read())
+
+        self.assertIn("# `Alpha.md`", result.content[0].text)
+        self.assertIn("Body", result.content[0].text)
+        self.assertEqual(result.structuredContent["frontmatter"]["tags"], ["project"])
+        self.assertEqual(result.structuredContent["path"], "Alpha.md")
 
 
 if __name__ == "__main__":

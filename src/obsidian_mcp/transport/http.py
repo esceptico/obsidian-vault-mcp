@@ -4,7 +4,7 @@ from typing import Any
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ToolAnnotations
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -12,6 +12,18 @@ from obsidian_mcp.core.config import ServerSettings, load_settings
 from obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
+from obsidian_mcp.transport.formatters import (
+    format_backlinks,
+    format_create_note,
+    format_delete_path,
+    format_list,
+    format_move_path,
+    format_read,
+    format_reindex,
+    format_search,
+    format_update_note,
+    text_result,
+)
 from obsidian_mcp.vault.service import Vault
 
 log = get_logger("server")
@@ -129,7 +141,10 @@ def create_mcp(settings: ServerSettings | None = None, vault: Vault | None = Non
     )
     mcp = FastMCP(
         "Obsidian Vault MCP",
-        instructions="Headless tools for an Obsidian-flavored Markdown vault.",
+        instructions=(
+            "Headless tools for an Obsidian-flavored Markdown vault. Tool results include "
+            "Markdown text in content and machine-readable data in structuredContent."
+        ),
         host=settings.host,
         port=settings.port,
         stateless_http=True,
@@ -174,81 +189,101 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     materially improve client UX (search mode/limit, default destructive
     strategy=trash). Everything else is required."""
 
-    @mcp.tool(annotations=_READ_ONLY)
+    @mcp.tool(annotations=_READ_ONLY, structured_output=False)
     def vault_list(
         path: str,
         sort_by: ListSortBy = ListSortBy.NAME,
         sort_order: SortOrder = SortOrder.ASC,
-    ) -> list[dict[str, Any]]:
+    ) -> CallToolResult:
         """List files and directories with size/created_at/modified_at metadata.
 
         Pass "" for the vault root. Sort with sort_by=name|modified_at|created_at|size
-        and sort_order=asc|desc.
+        and sort_order=asc|desc. Returns Markdown text plus structuredContent entries.
         """
-        return vault.list(path, sort_by, sort_order)
+        entries = vault.list(path, sort_by, sort_order)
+        structured = {
+            "path": path,
+            "sort_by": ListSortBy(sort_by).value,
+            "sort_order": SortOrder(sort_order).value,
+            "entries": entries,
+        }
+        return text_result(
+            format_list(path, entries, ListSortBy(sort_by), SortOrder(sort_order)),
+            structured,
+        )
 
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_read(path: str) -> dict[str, Any]:
-        """Read a Markdown file with content, frontmatter, links, tags, and file metadata."""
-        return vault.read(path)
+    @mcp.tool(annotations=_READ_ONLY, structured_output=False)
+    def vault_read(path: str) -> CallToolResult:
+        """Read a Markdown file. Returns Markdown text plus structuredContent metadata."""
+        result = vault.read(path)
+        return text_result(format_read(result), result)
 
-    @mcp.tool(annotations=_READ_ONLY)
+    @mcp.tool(annotations=_READ_ONLY, structured_output=False)
     def vault_search(
         query: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
         mode: SearchMode = SearchMode.HYBRID,
-    ) -> dict[str, Any]:
-        """Search vault notes. Hybrid combines FTS5 + embeddings; vector requires OPENAI_API_KEY."""
-        return vault.search(query, limit, mode)
+    ) -> CallToolResult:
+        """Search vault notes. Returns Markdown hits plus structuredContent data."""
+        search_mode = SearchMode(mode)
+        result = vault.search(query, limit, search_mode)
+        structured = {"query": query, "limit": limit, "mode": search_mode.value, **result}
+        return text_result(format_search(query, search_mode, result), structured)
 
-    @mcp.tool(annotations=_CREATE_NOTE)
+    @mcp.tool(annotations=_CREATE_NOTE, structured_output=False)
     def vault_create_note(
         path: str,
         content: str,
         frontmatter: dict[str, Any] | None = None,
         overwrite: bool = False,
-    ) -> dict[str, Any]:
-        """Create a Markdown note. Pass `overwrite=true` to replace an existing one."""
-        return vault.create_note(path, content, frontmatter, overwrite)
+    ) -> CallToolResult:
+        """Create a Markdown note. Returns a Markdown summary plus structuredContent data."""
+        result = vault.create_note(path, content, frontmatter, overwrite)
+        return text_result(format_create_note(result), result)
 
-    @mcp.tool(annotations=_UPDATE_NOTE)
+    @mcp.tool(annotations=_UPDATE_NOTE, structured_output=False)
     def vault_update_note(
         path: str,
         content: str | None = None,
         frontmatter_patch: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Replace a note body and/or patch YAML frontmatter. Null patch values delete keys."""
-        return vault.update_note(path, content, frontmatter_patch)
+    ) -> CallToolResult:
+        """Replace note body and/or patch frontmatter. Returns text plus structuredContent."""
+        result = vault.update_note(path, content, frontmatter_patch)
+        return text_result(format_update_note(result), result)
 
-    @mcp.tool(annotations=_MOVE_PATH)
+    @mcp.tool(annotations=_MOVE_PATH, structured_output=False)
     def vault_move_path(
         source: str,
         destination: str,
         rewrite_links: bool = True,
         overwrite: bool = False,
-    ) -> dict[str, Any]:
-        """Move or rename a file/directory, with wikilink rewriting for note renames."""
-        return vault.move_path(source, destination, rewrite_links, overwrite)
+    ) -> CallToolResult:
+        """Move or rename a file/directory. Returns a text summary plus structuredContent."""
+        result = vault.move_path(source, destination, rewrite_links, overwrite)
+        return text_result(format_move_path(result), result)
 
-    @mcp.tool(annotations=_DELETE_PATH)
+    @mcp.tool(annotations=_DELETE_PATH, structured_output=False)
     def vault_delete_path(
         path: str,
         recursive: bool = False,
         strategy: DeleteStrategy = DeleteStrategy.TRASH,
-    ) -> dict[str, Any]:
-        """Delete a file or directory. `strategy=trash` (default) preserves the file in .trash/."""
-        return vault.delete_path(path, recursive, strategy)
+    ) -> CallToolResult:
+        """Delete a file or directory. Returns a text summary plus structuredContent."""
+        result = vault.delete_path(path, recursive, strategy)
+        return text_result(format_delete_path(result), result)
 
-    @mcp.tool(annotations=_READ_ONLY)
-    def vault_backlinks(path: str) -> dict[str, Any]:
-        """Find notes that link to a target note via Obsidian wikilinks."""
-        return vault.backlinks(path)
+    @mcp.tool(annotations=_READ_ONLY, structured_output=False)
+    def vault_backlinks(path: str) -> CallToolResult:
+        """Find notes that link to a target note. Returns Markdown plus structuredContent."""
+        result = vault.backlinks(path)
+        return text_result(format_backlinks(result), result)
 
-    @mcp.tool(annotations=_REINDEX)
-    def vault_reindex() -> dict[str, Any]:
+    @mcp.tool(annotations=_REINDEX, structured_output=False)
+    def vault_reindex() -> CallToolResult:
         """Re-scan the vault from disk and bring the index up to date.
-        Returns a diff summary (added / modified / removed / unchanged / embedded)."""
-        return {"ok": True, **vault.reindex()}
+        Returns a Markdown summary plus structuredContent diff counts."""
+        result = {"ok": True, **vault.reindex()}
+        return text_result(format_reindex(result), result)
 
 
 def main() -> None:
