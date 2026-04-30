@@ -9,7 +9,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from obsidian_mcp.core.config import ServerSettings, load_settings
-from obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS
+from obsidian_mcp.core.constants import DEFAULT_LIST_LIMIT, DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS, MAX_LIST_LIMIT
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
 from obsidian_mcp.transport.formatters import (
@@ -194,17 +194,32 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         path: str,
         sort_by: ListSortBy = ListSortBy.NAME,
         sort_order: SortOrder = SortOrder.ASC,
+        limit: int = DEFAULT_LIST_LIMIT,
+        offset: int = 0,
     ) -> CallToolResult:
         """List files and directories with size/created_at/modified_at metadata.
 
         Pass "" for the vault root. Sort with sort_by=name|modified_at|created_at|size
-        and sort_order=asc|desc. Returns Markdown text plus structuredContent entries.
+        and sort_order=asc|desc. Page with limit and offset.
+        Returns Markdown text plus structuredContent entries.
         """
-        entries = vault.list(path, sort_by, sort_order)
+        if limit < 1 or limit > MAX_LIST_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
+        if offset < 0:
+            raise ValueError("offset must be greater than or equal to 0")
+        all_entries = vault.list(path, sort_by, sort_order)
+        entries = all_entries[offset : offset + limit]
+        total = len(all_entries)
+        next_offset = offset + len(entries) if offset + len(entries) < total else None
         structured = {
             "path": path,
             "sort_by": ListSortBy(sort_by).value,
             "sort_order": SortOrder(sort_order).value,
+            "limit": limit,
+            "offset": offset,
+            "total": total,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
             "entries": entries,
             # Backward compatibility for clients that cached the old
             # list[dict] output schema inferred by FastMCP. That schema
@@ -212,7 +227,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
             "result": entries,
         }
         return text_result(
-            format_list(path, entries, ListSortBy(sort_by), SortOrder(sort_order)),
+            format_list(path, entries, ListSortBy(sort_by), SortOrder(sort_order), total, offset, limit),
             structured,
         )
 

@@ -17,6 +17,12 @@ DEFAULT_SEARCH_LIMIT = 10
 MAX_SEARCH_LIMIT = 100
 """Largest search limit accepted from MCP/CLI callers."""
 
+DEFAULT_LIST_LIMIT = 50
+"""Number of entries returned by vault_list when the client doesn't specify."""
+
+MAX_LIST_LIMIT = 200
+"""Largest vault_list page size accepted from MCP callers."""
+
 SCORE_DECIMALS = 6
 """Decimal places retained when rounding search scores (FTS, vector, hybrid)."""
 

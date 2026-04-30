@@ -154,6 +154,9 @@ class ToolSchemaTests(unittest.TestCase):
         tools = self._tools()
         self.assertEqual(tools["vault_create_note"].inputSchema["required"], ["path", "content"])
         self.assertEqual(tools["vault_update_note"].inputSchema["required"], ["path"])
+        self.assertEqual(tools["vault_list"].inputSchema["required"], ["path"])
+        self.assertEqual(tools["vault_list"].inputSchema["properties"]["limit"]["default"], 50)
+        self.assertEqual(tools["vault_list"].inputSchema["properties"]["offset"]["default"], 0)
 
     def test_tool_output_schemas_do_not_force_stale_structured_shapes(self) -> None:
         tools = self._tools()
@@ -224,20 +227,44 @@ class ToolResultTests(unittest.TestCase):
         self.assertEqual(result.structuredContent["mode"], "bm25")
         self.assertEqual(result.structuredContent["hits"][0]["path"], "Note.md")
 
-    def test_list_wraps_entries_for_structured_content(self) -> None:
+    def test_list_pages_entries_and_wraps_structured_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "Alpha.md").write_text("alpha", encoding="utf-8")
+            Path(tmp, "Beta.md").write_text("beta", encoding="utf-8")
             mcp = self._mcp(tmp)
 
             async def call_list():
-                return await mcp.call_tool("vault_list", {"path": ""})
+                return await mcp.call_tool(
+                    "vault_list",
+                    {"path": "", "sort_by": "name", "sort_order": "asc", "limit": 1, "offset": 1},
+                )
 
             result = asyncio.run(call_list())
 
-        self.assertIn("Found 1 entries", result.content[0].text)
+        self.assertIn("Showing entries 2-2 of 2", result.content[0].text)
         self.assertEqual(result.structuredContent["path"], "")
-        self.assertEqual(result.structuredContent["entries"][0]["path"], "Alpha.md")
+        self.assertEqual(result.structuredContent["limit"], 1)
+        self.assertEqual(result.structuredContent["offset"], 1)
+        self.assertEqual(result.structuredContent["total"], 2)
+        self.assertFalse(result.structuredContent["has_more"])
+        self.assertIsNone(result.structuredContent["next_offset"])
+        self.assertEqual(result.structuredContent["entries"][0]["path"], "Beta.md")
         self.assertEqual(result.structuredContent["result"], result.structuredContent["entries"])
+
+    def test_list_reports_next_offset_when_more_entries_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "Alpha.md").write_text("alpha", encoding="utf-8")
+            Path(tmp, "Beta.md").write_text("beta", encoding="utf-8")
+            mcp = self._mcp(tmp)
+
+            async def call_list():
+                return await mcp.call_tool("vault_list", {"path": "", "limit": 1})
+
+            result = asyncio.run(call_list())
+
+        self.assertIn("More entries available. Use `offset=1` with `limit=1`.", result.content[0].text)
+        self.assertTrue(result.structuredContent["has_more"])
+        self.assertEqual(result.structuredContent["next_offset"], 1)
 
     def test_read_returns_note_markdown_and_structured_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -17,18 +17,33 @@ def format_list(
     entries: list[dict[str, Any]],
     sort_by: ListSortBy,
     sort_order: SortOrder,
+    total: int,
+    offset: int,
+    limit: int,
 ) -> str:
     label = path or "vault root"
-    if not entries:
+    if total == 0:
         return f"No files or directories found in `{_inline_code(label)}`."
+    if not entries:
+        return (
+            f"No entries on this page for `{_inline_code(label)}`. "
+            f"Total entries: {total}. Use a smaller offset."
+        )
 
+    end = offset + len(entries)
     lines = [
-        f"Found {len(entries)} entries in `{_inline_code(label)}`.",
+        f"Showing entries {offset + 1}-{end} of {total} in `{_inline_code(label)}`.",
         f"Sorted by `{sort_by.value}` {sort_order.value}.",
-        "",
-        "| Path | Kind | Size | Modified |",
-        "| --- | --- | ---: | --- |",
     ]
+    if end < total:
+        lines.append(f"More entries available. Use `offset={end}` with `limit={limit}`.")
+    lines.extend(
+        [
+            "",
+            "| Path | Kind | Size | Modified |",
+            "| --- | --- | ---: | --- |",
+        ]
+    )
     for entry in entries:
         lines.append(
             "| "
