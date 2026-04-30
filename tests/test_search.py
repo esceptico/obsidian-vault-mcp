@@ -48,6 +48,22 @@ class SearchTests(unittest.TestCase):
             )
             self.assertIs(idx._client(), idx._client())
 
+    def test_openai_client_uses_configured_base_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            idx = SearchIndex(
+                Path(tmp) / "i.sqlite",
+                EmbeddingSettings(
+                    api_key="k",
+                    base_url="https://openrouter.ai/api/v1",
+                    model="text-embedding-3-small",
+                ),
+            )
+            with patch("obsidian_mcp.index.search.OpenAI") as openai:
+                self.assertIs(idx._client(), openai.return_value)
+
+        openai.assert_called_once()
+        self.assertEqual(openai.call_args.kwargs["base_url"], "https://openrouter.ai/api/v1")
+
     def test_upsert_does_not_full_rebuild(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             index = SearchIndex(Path(tmp) / "i.sqlite", EmbeddingSettings())

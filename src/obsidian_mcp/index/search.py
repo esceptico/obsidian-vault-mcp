@@ -168,6 +168,7 @@ class SearchIndex:
         if self._openai_client is None:
             self._openai_client = OpenAI(
                 api_key=self.embeddings.api_key,
+                base_url=self.embeddings.base_url,
                 max_retries=OPENAI_MAX_RETRIES,
                 timeout=EMBEDDING_TIMEOUT_SECONDS,
             )

@@ -18,6 +18,7 @@ class VaultSettings:
 @dataclass(frozen=True)
 class EmbeddingSettings:
     api_key: str | None = None
+    base_url: str | None = None
     model: str = "text-embedding-3-small"
     dimensions: int | None = None
     batch_size: int = 64
@@ -45,6 +46,10 @@ class ServerSettings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OBSIDIAN_MCP_OPENAI_API_KEY", "OPENAI_API_KEY"),
     )
+    openai_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OBSIDIAN_MCP_OPENAI_BASE_URL", "OPENAI_BASE_URL"),
+    )
     embedding_model: str = Field(default="text-embedding-3-small")
     embedding_dimensions: int | None = Field(default=None, gt=0)
     embedding_batch_size: int = Field(default=64, ge=1)
@@ -64,6 +69,7 @@ class ServerSettings(BaseSettings):
     def embeddings(self) -> EmbeddingSettings:
         return EmbeddingSettings(
             api_key=self.openai_api_key.get_secret_value() if self.openai_api_key else None,
+            base_url=self.openai_base_url,
             model=self.embedding_model,
             dimensions=self.embedding_dimensions,
             batch_size=self.embedding_batch_size,
