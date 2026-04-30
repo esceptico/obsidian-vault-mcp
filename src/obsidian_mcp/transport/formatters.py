@@ -4,6 +4,7 @@ from typing import Any
 from mcp.types import CallToolResult, TextContent
 
 from obsidian_mcp.core.types import ListSortBy, SearchMode, SortOrder
+from obsidian_mcp.transport.pagination import Page
 
 
 def text_result(markdown: str, structured: dict[str, Any]) -> CallToolResult:
@@ -15,14 +16,13 @@ def text_result(markdown: str, structured: dict[str, Any]) -> CallToolResult:
 
 def format_list(
     path: str,
-    entries: list[dict[str, Any]],
+    page: Page[dict[str, Any]],
     sort_by: ListSortBy,
     sort_order: SortOrder,
-    total: int,
-    offset: int,
-    limit: int,
 ) -> str:
     label = path or "vault root"
+    entries = page.items
+    total = page.total if page.total is not None else page.returned
     if total == 0:
         return f"No files or directories found in `{_inline_code(label)}`."
     if not entries:
@@ -31,13 +31,13 @@ def format_list(
             f"Total entries: {total}. Use a smaller offset."
         )
 
-    end = offset + len(entries)
+    end = page.offset + page.returned
     lines = [
-        f"Showing entries {offset + 1}-{end} of {total} in `{_inline_code(label)}`.",
+        f"Showing entries {page.offset + 1}-{end} of {total} in `{_inline_code(label)}`.",
         f"Sorted by `{sort_by.value}` {sort_order.value}.",
     ]
-    if end < total:
-        lines.append(f"More entries available. Use `offset={end}` with `limit={limit}`.")
+    if page.has_more:
+        lines.append(f"More entries available. Use `offset={end}` with `limit={page.limit}`.")
     lines.extend(
         [
             "",
@@ -78,16 +78,22 @@ def format_read(result: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def format_search(query: str, mode: SearchMode, result: dict[str, Any], offset: int, limit: int) -> str:
-    hits = result.get("hits") or []
-    warnings = result.get("warnings") or []
+def format_search(
+    query: str,
+    mode: SearchMode,
+    page: Page[dict[str, Any]],
+    warnings: list[str],
+) -> str:
+    hits = page.items
     if not hits:
         lines = [f"No matches found for `{_inline_code(query)}` using `{mode.value}` search."]
     else:
-        end = offset + len(hits)
-        lines = [f"Showing matches {offset + 1}-{end} for `{_inline_code(query)}` using `{mode.value}` search."]
-        if result.get("has_more"):
-            lines.append(f"More matches may be available. Use `offset={end}` with `limit={limit}`.")
+        end = page.offset + page.returned
+        lines = [
+            f"Showing matches {page.offset + 1}-{end} for `{_inline_code(query)}` using `{mode.value}` search."
+        ]
+        if page.has_more:
+            lines.append(f"More matches may be available. Use `offset={end}` with `limit={page.limit}`.")
 
     for warning in warnings:
         lines.append(f"Warning: {warning}")

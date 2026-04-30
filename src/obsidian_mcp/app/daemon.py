@@ -8,6 +8,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -170,7 +171,7 @@ def _count_notes(db_path: Path) -> int | None:
     if not db_path.exists():
         return None
     try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+        with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as conn:
             row = conn.execute("SELECT COUNT(*) FROM note_meta").fetchone()
         return int(row[0]) if row else None
     except sqlite3.Error:

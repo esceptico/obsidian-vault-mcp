@@ -30,6 +30,7 @@ from obsidian_mcp.transport.formatters import (
     format_update_note,
     text_result,
 )
+from obsidian_mcp.transport.pagination import page_items, validate_page
 from obsidian_mcp.vault.service import Vault
 
 log = get_logger("server")
@@ -209,31 +210,26 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         and sort_order=asc|desc. Page with limit and offset.
         Returns Markdown text plus structuredContent entries.
         """
-        if limit < 1 or limit > MAX_LIST_LIMIT:
-            raise ValueError(f"limit must be between 1 and {MAX_LIST_LIMIT}")
-        if offset < 0:
-            raise ValueError("offset must be greater than or equal to 0")
+        validate_page(limit, offset, MAX_LIST_LIMIT)
         all_entries = vault.list(path, sort_by, sort_order)
-        entries = all_entries[offset : offset + limit]
-        total = len(all_entries)
-        next_offset = offset + len(entries) if offset + len(entries) < total else None
+        page = page_items(all_entries, limit, offset)
         structured = {
             "path": path,
             "sort_by": ListSortBy(sort_by).value,
             "sort_order": SortOrder(sort_order).value,
-            "limit": limit,
-            "offset": offset,
-            "total": total,
-            "has_more": next_offset is not None,
-            "next_offset": next_offset,
-            "entries": entries,
+            "limit": page.limit,
+            "offset": page.offset,
+            "total": page.total,
+            "has_more": page.has_more,
+            "next_offset": page.next_offset,
+            "entries": page.items,
             # Backward compatibility for clients that cached the old
             # list[dict] output schema inferred by FastMCP. That schema
             # wrapped the list under a required "result" key.
-            "result": entries,
+            "result": page.items,
         }
         return text_result(
-            format_list(path, entries, ListSortBy(sort_by), SortOrder(sort_order), total, offset, limit),
+            format_list(path, page, ListSortBy(sort_by), SortOrder(sort_order)),
             structured,
         )
 
@@ -251,31 +247,27 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
         mode: SearchMode = SearchMode.HYBRID,
     ) -> CallToolResult:
         """Search vault notes. Page with limit and offset. Returns Markdown plus structuredContent."""
-        if limit < 1 or limit > MAX_SEARCH_LIMIT:
-            raise ValueError(f"limit must be between 1 and {MAX_SEARCH_LIMIT}")
-        if offset < 0:
-            raise ValueError("offset must be greater than or equal to 0")
+        validate_page(limit, offset, MAX_SEARCH_LIMIT)
         search_mode = SearchMode(mode)
         requested = min(MAX_SEARCH_LIMIT, offset + limit + 1)
         result = vault.search(query, requested, search_mode)
-        all_hits = result.get("hits") or []
-        hits = all_hits[offset : offset + limit]
-        next_offset = offset + len(hits) if offset + len(hits) < len(all_hits) else None
+        page = page_items(result.get("hits") or [], limit, offset)
+        warnings = result.get("warnings") or []
         paged = {
-            "hits": hits,
-            "warnings": result.get("warnings") or [],
-            "has_more": next_offset is not None,
-            "next_offset": next_offset,
+            "hits": page.items,
+            "warnings": warnings,
+            "has_more": page.has_more,
+            "next_offset": page.next_offset,
         }
         structured = {
             "query": query,
-            "limit": limit,
-            "offset": offset,
-            "returned": len(hits),
+            "limit": page.limit,
+            "offset": page.offset,
+            "returned": page.returned,
             "mode": search_mode.value,
             **paged,
         }
-        return text_result(format_search(query, search_mode, paged, offset, limit), structured)
+        return text_result(format_search(query, search_mode, page, warnings), structured)
 
     @mcp.tool(annotations=_CREATE_NOTE, structured_output=False)
     def vault_create_note(

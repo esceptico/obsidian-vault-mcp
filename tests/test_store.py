@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
@@ -97,8 +98,7 @@ class StoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "i.sqlite"
             # Manually plant a legacy `notes` FTS table populated up to rowid=3.
-            import sqlite3
-            with sqlite3.connect(db_path) as raw:
+            with closing(sqlite3.connect(db_path)) as raw:
                 raw.execute(
                     "CREATE VIRTUAL TABLE notes USING fts5("
                     "path UNINDEXED, title, frontmatter, body, tags, tokenize='unicode61')"
@@ -109,6 +109,7 @@ class StoreTests(unittest.TestCase):
                         "VALUES (?, ?, ?, ?, ?)",
                         (f"Old{i}.md", "old", "{}", "old", ""),
                     )
+                raw.commit()
             # New SearchStore should detect the missing schema_version, drop
             # the legacy table, and let upsert_note succeed without collision.
             store = SearchStore(db_path)

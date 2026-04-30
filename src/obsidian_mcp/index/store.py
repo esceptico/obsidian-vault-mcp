@@ -1,5 +1,7 @@
 import sqlite3
 import struct
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -455,7 +457,13 @@ class SearchStore:
         row = conn.execute(_SELECT_VEC_TABLE_EXISTS).fetchone()
         return row is not None
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        with closing(self._open_connection()) as conn:
+            with conn:
+                yield conn
+
+    def _open_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.database_path)
         conn.row_factory = sqlite3.Row
         _load_vec_extension(conn)

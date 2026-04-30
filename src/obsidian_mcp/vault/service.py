@@ -1,7 +1,6 @@
 import os
 import shutil
 import threading
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,8 +28,9 @@ from obsidian_mcp.markdown.obsidian import (
     wikilinks,
 )
 from obsidian_mcp.core.logging import get_logger
-from obsidian_mcp.core.types import DeleteStrategy, EntryKind, ListSortBy, SearchMode, SortOrder
+from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
 from obsidian_mcp.index.search import IndexedNote, SearchIndex
+from obsidian_mcp.vault.listing import entry_for, file_metadata, sort_entries
 from obsidian_mcp.vault.paths import (
     clean_relative_path,
     ensure_markdown_extension,
@@ -40,15 +40,6 @@ from obsidian_mcp.vault.paths import (
 from obsidian_mcp.vault.watcher import VaultWatcher
 
 log = get_logger("vault")
-
-
-@dataclass(frozen=True)
-class VaultEntry:
-    path: str
-    kind: EntryKind
-    size: int
-    created_at: str | None
-    modified_at: str
 
 
 class Vault:
@@ -129,16 +120,8 @@ class Vault:
         for child in directory.iterdir():
             if self._is_ignored_path(child):
                 continue
-            kind = EntryKind.DIRECTORY if child.is_dir() else EntryKind.FILE
-            metadata = file_metadata(child)
-            entries.append(
-                {
-                    "path": self.relative(child),
-                    "kind": kind.value,
-                    **metadata,
-                }
-            )
-        return _sort_entries(entries, sort_by, sort_order)
+            entries.append(entry_for(child, self.relative(child)))
+        return sort_entries(entries, sort_by, sort_order)
 
     def read(self, path: str) -> dict[str, Any]:
         file_path = self.resolve(path)
@@ -534,36 +517,3 @@ _DELETE_DISPATCH = {
     DeleteStrategy.TRASH: Vault._delete_to_trash,
     DeleteStrategy.DELETE: Vault._delete_permanently,
 }
-
-
-def file_metadata(path: Path) -> dict[str, Any]:
-    stat = path.stat()
-    created_at = getattr(stat, "st_birthtime", None)
-    return {
-        "size": stat.st_size,
-        "created_at": _timestamp(created_at) if created_at is not None else None,
-        "modified_at": _timestamp(stat.st_mtime),
-    }
-
-
-def _timestamp(value: float) -> str:
-    return datetime.fromtimestamp(value, timezone.utc).isoformat()
-
-
-def _sort_entries(entries: list[dict[str, Any]], sort_by: ListSortBy, sort_order: SortOrder) -> list[dict[str, Any]]:
-    if sort_by == ListSortBy.NAME:
-        reverse = sort_order == SortOrder.DESC
-        directories = [entry for entry in entries if entry["kind"] == EntryKind.DIRECTORY.value]
-        files = [entry for entry in entries if entry["kind"] == EntryKind.FILE.value]
-        return sorted(directories, key=lambda entry: entry["path"].lower(), reverse=reverse) + sorted(
-            files, key=lambda entry: entry["path"].lower(), reverse=reverse
-        )
-
-    reverse = sort_order == SortOrder.DESC
-    with_value = [entry for entry in entries if entry[sort_by.value] is not None]
-    without_value = [entry for entry in entries if entry[sort_by.value] is None]
-
-    def key(entry: dict[str, Any]) -> tuple[Any, str]:
-        return entry[sort_by.value], entry["path"].lower()
-
-    return sorted(with_value, key=key, reverse=reverse) + sorted(without_value, key=lambda entry: entry["path"].lower())

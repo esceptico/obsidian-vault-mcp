@@ -50,8 +50,13 @@ class SearchIndex:
         if embed and self.embeddings.enabled:
             try:
                 self._embed_and_store([(rowid, record)])
-            except Exception:
-                log.warning("embedding failed for %s; note remains FTS-indexed", note.path)
+            except Exception as exc:
+                log.warning(
+                    "embedding failed for %s (%s: %s); note remains FTS-indexed",
+                    note.path,
+                    type(exc).__name__,
+                    exc,
+                )
 
     def delete_note(self, path: str) -> None:
         self.store.delete_note(path)
@@ -79,8 +84,8 @@ class SearchIndex:
         items = [(rowid, records_by_rowid[rowid]) for rowid, _ in pending if rowid in records_by_rowid]
         try:
             return self._embed_and_store(items)
-        except Exception:
-            log.warning("embedding backfill failed; notes remain FTS-indexed")
+        except Exception as exc:
+            log.warning("embedding backfill failed (%s: %s); notes remain FTS-indexed", type(exc).__name__, exc)
             return 0
 
     # --- search -------------------------------------------------------------
