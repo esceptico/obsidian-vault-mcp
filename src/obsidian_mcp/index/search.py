@@ -1,16 +1,13 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
-import tiktoken
 from openai import OpenAI
 
 from obsidian_mcp.core.config import EmbeddingSettings
 from obsidian_mcp.core.constants import (
-    EMBEDDING_FALLBACK_ENCODING,
-    EMBEDDING_MAX_INPUT_TOKENS,
+    EMBEDDING_MAX_INPUT_CHARS,
     EMBEDDING_TIMEOUT_SECONDS,
     MAX_SEARCH_LIMIT,
     OPENAI_MAX_RETRIES,
@@ -143,7 +140,7 @@ class SearchIndex:
         total = 0
         for batch_start in range(0, len(items), self.embeddings.batch_size):
             batch = items[batch_start : batch_start + self.embeddings.batch_size]
-            inputs = [_truncate_for_embedding(record.search_text, self.embeddings.model) for _, record in batch]
+            inputs = [_truncate_for_embedding(record.search_text) for _, record in batch]
             vectors = self._embed_texts(inputs)
             dim = len(vectors[0]) if vectors else 0
             self.store.upsert_embeddings(
@@ -208,23 +205,8 @@ def _stored_note(note: IndexedNote) -> StoredNote:
     )
 
 
-@lru_cache(maxsize=4)
-def _tokenizer_for(model: str) -> tiktoken.Encoding:
-    try:
-        return tiktoken.encoding_for_model(model)
-    except KeyError:
-        return tiktoken.get_encoding(EMBEDDING_FALLBACK_ENCODING)
-
-
-def _truncate_for_embedding(text: str, model: str) -> str:
-    """Truncate to EMBEDDING_MAX_INPUT_TOKENS using the model's actual
-    tokenizer. Char-based caps are unsafe because code, URLs, and non-English
-    can drop to ~1 char/token — well under what a 24k-char budget assumes."""
-    encoder = _tokenizer_for(model)
-    tokens = encoder.encode(text)
-    if len(tokens) <= EMBEDDING_MAX_INPUT_TOKENS:
-        return text
-    return encoder.decode(tokens[:EMBEDDING_MAX_INPUT_TOKENS])
+def _truncate_for_embedding(text: str) -> str:
+    return text[:EMBEDDING_MAX_INPUT_CHARS]
 
 
 def _make_fts_query(query: str) -> str:
