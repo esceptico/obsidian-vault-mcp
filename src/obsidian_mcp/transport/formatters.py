@@ -73,6 +73,9 @@ def format_read(result: dict[str, Any]) -> str:
     metadata = _read_metadata_lines(result)
     if metadata:
         lines.extend(["", "\n".join(metadata)])
+    page = result.get("page") or {}
+    if page.get("total") is not None:
+        lines.extend(["", _read_page_line(page)])
     lines.extend(["", result.get("content") or ""])
     return "\n".join(lines).rstrip()
 
@@ -186,6 +189,19 @@ def _read_metadata_lines(result: dict[str, Any]) -> list[str]:
         if count:
             metadata.append(f"{label}: {count}")
     return metadata
+
+
+def _read_page_line(page: dict[str, Any]) -> str:
+    offset = int(page.get("offset") or 0)
+    returned = int(page.get("returned") or 0)
+    total = int(page.get("total") or 0)
+    if total == 0:
+        return "Showing 0 characters."
+    end = offset + returned
+    line = f"Showing characters {offset + 1}-{end} of {total}."
+    if page.get("has_more"):
+        line += f" More content available. Use `offset={end}` with `limit={page.get('limit')}`."
+    return line
 
 
 def _format_bytes(value: Any) -> str:

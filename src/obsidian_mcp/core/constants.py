@@ -23,6 +23,12 @@ DEFAULT_LIST_LIMIT = 50
 MAX_LIST_LIMIT = 200
 """Largest vault_list page size accepted from MCP callers."""
 
+DEFAULT_READ_LIMIT = 12_000
+"""Number of characters returned by vault_read when the client doesn't specify."""
+
+MAX_READ_LIMIT = 50_000
+"""Largest vault_read page size accepted from MCP callers."""
+
 SCORE_DECIMALS = 6
 """Decimal places retained when rounding search scores (FTS, vector, hybrid)."""
 

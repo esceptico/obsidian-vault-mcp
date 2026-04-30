@@ -158,6 +158,9 @@ class ToolSchemaTests(unittest.TestCase):
         self.assertEqual(tools["vault_list"].inputSchema["properties"]["path"]["default"], "")
         self.assertEqual(tools["vault_list"].inputSchema["properties"]["limit"]["default"], 50)
         self.assertEqual(tools["vault_list"].inputSchema["properties"]["offset"]["default"], 0)
+        self.assertEqual(tools["vault_read"].inputSchema["required"], ["path"])
+        self.assertEqual(tools["vault_read"].inputSchema["properties"]["limit"]["default"], 12000)
+        self.assertEqual(tools["vault_read"].inputSchema["properties"]["offset"]["default"], 0)
         self.assertEqual(tools["vault_search"].inputSchema["required"], ["query"])
         self.assertEqual(tools["vault_search"].inputSchema["properties"]["limit"]["default"], 10)
         self.assertEqual(tools["vault_search"].inputSchema["properties"]["offset"]["default"], 0)
@@ -303,9 +306,30 @@ class ToolResultTests(unittest.TestCase):
             result = asyncio.run(call_read())
 
         self.assertIn("# `Alpha.md`", result.content[0].text)
+        self.assertIn("Showing characters 1-28 of 28.", result.content[0].text)
         self.assertIn("Body", result.content[0].text)
         self.assertEqual(result.structuredContent["frontmatter"]["tags"], ["project"])
         self.assertEqual(result.structuredContent["path"], "Alpha.md")
+        self.assertEqual(result.structuredContent["page"]["offset"], 0)
+        self.assertFalse(result.structuredContent["page"]["has_more"])
+
+    def test_read_pages_large_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "Alpha.md").write_text("0123456789abcdef", encoding="utf-8")
+            mcp = self._mcp(tmp)
+
+            async def call_read():
+                return await mcp.call_tool("vault_read", {"path": "Alpha.md", "limit": 4, "offset": 5})
+
+            result = asyncio.run(call_read())
+
+        self.assertIn("Showing characters 6-9 of 16.", result.content[0].text)
+        self.assertIn("More content available. Use `offset=9` with `limit=4`.", result.content[0].text)
+        self.assertIn("\n5678", result.content[0].text)
+        self.assertNotIn("01234", result.content[0].text)
+        self.assertEqual(result.structuredContent["content"], "5678")
+        self.assertNotIn("body", result.structuredContent)
+        self.assertEqual(result.structuredContent["page"]["next_offset"], 9)
 
 
 if __name__ == "__main__":

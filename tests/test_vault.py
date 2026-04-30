@@ -95,15 +95,26 @@ class VaultTests(unittest.TestCase):
             self.assertIn("[[New Note|alias]]", ref["content"])
             self.assertIn("[[New Note#Heading]]", ref["content"])
 
-    def test_nested_dot_trash_is_visible(self) -> None:
+    def test_dot_directories_are_hidden_at_any_depth(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            nested = Path(tmp.name) / "Projects" / ".trash" / "note.md"
-            nested.parent.mkdir(parents=True)
-            nested.write_text("hello", encoding="utf-8")
-            listed = self._list(vault, "Projects/.trash")
-            self.assertEqual(len(listed), 1)
-            self.assertEqual(listed[0]["path"], "Projects/.trash/note.md")
+            hidden = Path(tmp.name) / "Projects" / ".notes" / "note.md"
+            hidden.parent.mkdir(parents=True)
+            hidden.write_text("hidden text", encoding="utf-8")
+            visible = Path(tmp.name) / "Projects" / "visible.md"
+            visible.write_text("visible text", encoding="utf-8")
+
+            listed = self._list(vault, "Projects")
+            self.assertEqual([entry["path"] for entry in listed], ["Projects/visible.md"])
+            with self.assertRaises(ValueError):
+                self._list(vault, "Projects/.notes")
+            with self.assertRaises(ValueError):
+                vault.read("Projects/.notes/note.md")
+
+            summary = vault.sync_from_disk()
+            self.assertEqual(summary["added"], 1)
+            self.assertEqual(self._bm25(vault, "hidden text")["hits"], [])
+            self.assertEqual(self._bm25(vault, "visible text")["hits"][0]["path"], "Projects/visible.md")
 
     def test_top_level_trash_is_hidden(self) -> None:
         tmp, vault = self.make_vault()

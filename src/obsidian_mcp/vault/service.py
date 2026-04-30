@@ -117,6 +117,8 @@ class Vault:
         directory = self.resolve(path)
         if not directory.is_dir():
             raise ValueError(f"Not a directory: {path}")
+        if directory != self.root and self._is_ignored_path(directory):
+            raise ValueError(f"Refusing to list hidden path: {path}")
         entries = []
         for child in directory.iterdir():
             if self._is_ignored_path(child):
@@ -128,6 +130,8 @@ class Vault:
         file_path = self.resolve(path)
         if not file_path.is_file():
             raise ValueError(f"Not a file: {path}")
+        if self._is_ignored_path(file_path):
+            raise ValueError(f"Refusing to read hidden path: {path}")
         return self._read_note(file_path)
 
     def create_note(
@@ -195,9 +199,14 @@ class Vault:
     def _move_path_locked(self, source: str, destination: str, rewrite_links: bool, overwrite: bool) -> dict[str, Any]:
         original_source = source
         src = self.resolve(source)
+        clean_destination = clean_relative_path(destination)
         dst = self.resolve_for_write(destination)
         if not src.exists():
             raise FileNotFoundError(source)
+        if self._is_ignored_path(src):
+            raise ValueError(f"Refusing to move hidden path: {source}")
+        if self._is_ignored_relative_path(clean_destination, is_directory=src.is_dir()):
+            raise ValueError(f"Refusing to move to hidden path: {destination}")
         if dst.exists() and not overwrite:
             raise FileExistsError(f"Destination already exists: {destination}")
 
@@ -403,8 +412,8 @@ class Vault:
 
     def resolve_for_write(self, path: str) -> Path:
         clean = clean_relative_path(path)
-        if self._is_reserved_relative_path(clean):
-            raise ValueError("Path points to reserved obsidian-mcp storage")
+        if self._is_ignored_relative_path(clean, is_directory=False):
+            raise ValueError("Path points to hidden or reserved vault storage")
         candidate = self.root / clean
         parent = candidate.parent.resolve()
         self._ensure_inside_root(parent)
@@ -471,12 +480,20 @@ class Vault:
         return names
 
     def _is_ignored_path(self, path: Path) -> bool:
-        return self._is_reserved_relative_path(path.relative_to(self.root))
+        relative = path.relative_to(self.root)
+        return self._is_ignored_relative_path(relative, is_directory=path.is_dir())
+
+    def _is_ignored_relative_path(self, path: Path, *, is_directory: bool) -> bool:
+        return self._is_reserved_relative_path(path) or self._has_dot_directory(path, is_directory)
 
     def _is_reserved_relative_path(self, path: Path) -> bool:
         return is_relative_to(path, clean_relative_path(self.settings.trash_path)) or is_relative_to(
             path, Path(_STORAGE_DIR)
         )
+
+    def _has_dot_directory(self, path: Path, is_directory: bool) -> bool:
+        parts = path.parts if is_directory else path.parts[:-1]
+        return any(part.startswith(".") for part in parts)
 
     def _trash_dir(self) -> Path:
         clean = clean_relative_path(self.settings.trash_path)

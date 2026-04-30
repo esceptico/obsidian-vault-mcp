@@ -5,8 +5,10 @@ from mcp.types import CallToolResult, ToolAnnotations
 
 from obsidian_mcp.core.constants import (
     DEFAULT_LIST_LIMIT,
+    DEFAULT_READ_LIMIT,
     DEFAULT_SEARCH_LIMIT,
     MAX_LIST_LIMIT,
+    MAX_READ_LIMIT,
     MAX_SEARCH_LIMIT,
 )
 from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
@@ -71,10 +73,16 @@ class VaultToolHandlers:
             structured,
         )
 
-    def vault_read(self, path: str) -> CallToolResult:
-        """Read a Markdown file. Returns Markdown text plus structuredContent metadata."""
+    def vault_read(self, path: str, limit: int = DEFAULT_READ_LIMIT, offset: int = 0) -> CallToolResult:
+        """Read a Markdown file.
+
+        Page large notes with limit and offset. Offset/limit are character-based.
+        Returns Markdown text plus structuredContent metadata.
+        """
+        validate_page(limit, offset, MAX_READ_LIMIT)
         result = self._vault.read(path)
-        return text_result(format_read(result), result)
+        paged = _page_read_result(result, limit, offset)
+        return text_result(format_read(paged), paged)
 
     def vault_search(
         self,
@@ -183,3 +191,25 @@ def register_tools(mcp: FastMCP, vault: Vault) -> None:
     )
     mcp.add_tool(handlers.vault_backlinks, name="vault_backlinks", annotations=READ_ONLY_TOOL, structured_output=False)
     mcp.add_tool(handlers.vault_reindex, name="vault_reindex", annotations=REINDEX_TOOL, structured_output=False)
+
+
+def _page_read_result(result: dict[str, Any], limit: int, offset: int) -> dict[str, Any]:
+    content = str(result.get("content") or "")
+    total = len(content)
+    page_content = content[offset : offset + limit]
+    next_offset = offset + len(page_content) if offset + len(page_content) < total else None
+    paged = {
+        key: value
+        for key, value in result.items()
+        if key not in {"body", "content"}
+    }
+    paged["content"] = page_content
+    paged["page"] = {
+        "limit": limit,
+        "offset": offset,
+        "returned": len(page_content),
+        "total": total,
+        "has_more": next_offset is not None,
+        "next_offset": next_offset,
+    }
+    return paged
