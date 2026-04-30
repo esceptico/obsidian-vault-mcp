@@ -14,11 +14,10 @@ from pathlib import Path
 
 from obsidian_mcp.core.config import ServerSettings, load_settings
 
-
-STOP_TIMEOUT_SECONDS = 10.0
-START_TIMEOUT_SECONDS = 10.0
-LOG_TAIL_LINES = 200
-INDEX_FILENAME = "index.sqlite"
+_STOP_TIMEOUT_SECONDS = 10.0
+_START_TIMEOUT_SECONDS = 10.0
+_LOG_TAIL_LINES = 200
+_INDEX_FILENAME = "index.sqlite"
 
 
 @dataclass(frozen=True)
@@ -66,7 +65,7 @@ def _vault_id(vault_root: Path) -> str:
     return f"{safe}-{digest}"
 
 
-def start_daemon(host: str | None, port: int | None, timeout: float = START_TIMEOUT_SECONDS) -> int:
+def start_daemon(host: str | None, port: int | None, timeout: float = _START_TIMEOUT_SECONDS) -> int:
     health_host, health_port = _effective_endpoint(host, port)
     if health_port == 0:
         raise ValueError("start does not support --port 0 because the health port cannot be discovered")
@@ -108,7 +107,7 @@ def start_daemon(host: str | None, port: int | None, timeout: float = START_TIME
     return process.pid
 
 
-def stop_daemon(timeout: float = STOP_TIMEOUT_SECONDS) -> str:
+def stop_daemon(timeout: float = _STOP_TIMEOUT_SECONDS) -> str:
     paths = daemon_paths()
     pid = read_pid(paths.pid_file)
     if pid is None:
@@ -164,7 +163,7 @@ def _format_status(
 
 
 def _index_path(settings: ServerSettings) -> Path:
-    return settings.vault.root.expanduser() / ".obsidian-mcp" / INDEX_FILENAME
+    return settings.vault.root.expanduser() / ".obsidian-mcp" / _INDEX_FILENAME
 
 
 def _count_notes(db_path: Path) -> int | None:
@@ -197,7 +196,7 @@ def show_logs(follow: bool) -> None:
         print(f"no log file at {paths.log_file}")
         return
     lines = paths.log_file.read_text(encoding="utf-8", errors="replace").splitlines()
-    for line in lines[-LOG_TAIL_LINES:]:
+    for line in lines[-_LOG_TAIL_LINES:]:
         print(line)
 
 

@@ -5,6 +5,7 @@ description = "Headless HTTP MCP server for Obsidian-flavored Markdown vaults"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "click>=8.3.0",
     "mcp>=1.16.0",
     "openai>=1.109.0",
     "pydantic>=2.11.0",

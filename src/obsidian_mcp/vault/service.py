@@ -40,6 +40,7 @@ from obsidian_mcp.vault.paths import (
 from obsidian_mcp.vault.watcher import VaultWatcher
 
 log = get_logger("vault")
+_STORAGE_DIR = ".obsidian-mcp"
 
 
 class Vault:
@@ -48,7 +49,7 @@ class Vault:
         self.root = settings.root.resolve()
         if not self.root.exists() or not self.root.is_dir():
             raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
-        self._index = SearchIndex(self.root / ".obsidian-mcp" / "index.sqlite", embeddings or EmbeddingSettings())
+        self._index = SearchIndex(self.root / _STORAGE_DIR / "index.sqlite", embeddings or EmbeddingSettings())
         self._lock = threading.RLock()
         self._watcher: VaultWatcher | None = None
         # Reconcile the index against disk at startup so the first search
@@ -127,19 +128,7 @@ class Vault:
         file_path = self.resolve(path)
         if not file_path.is_file():
             raise ValueError(f"Not a file: {path}")
-        content = file_path.read_text(encoding="utf-8")
-        frontmatter, body = split_frontmatter(content)
-        return {
-            "path": self.relative(file_path),
-            "frontmatter": frontmatter,
-            "body": body,
-            "content": content,
-            "file": file_metadata(file_path),
-            "wikilinks": [link.__dict__ for link in wikilinks(body)],
-            "markdown_links": markdown_links(body),
-            "tags": sorted(set(frontmatter_tags(frontmatter) + inline_tags(body))),
-            "block_ids": block_ids(body),
-        }
+        return self._read_note(file_path)
 
     def create_note(
         self,
@@ -350,12 +339,7 @@ class Vault:
         Returns a small summary dict so callers can log the diff.
         """
         with self._lock:
-            on_disk: dict[str, str] = {}
-            for path in self.root.rglob("*.md"):
-                if not path.is_file() or self._is_ignored_path(path):
-                    continue
-                rel = self.relative(path)
-                on_disk[rel] = path.read_text(encoding="utf-8")
+            on_disk = self._markdown_files()
 
             indexed = self._index.store.all_records()
             added = modified = unchanged = removed = 0
@@ -452,10 +436,31 @@ class Vault:
 
     def _markdown_files(self) -> dict[str, str]:
         files = {}
-        for path in self.root.rglob("*.md"):
-            if path.is_file() and not self._is_ignored_path(path):
-                files[self.relative(path)] = path.read_text(encoding="utf-8")
+        for path in self._iter_markdown_paths():
+            files[self.relative(path)] = path.read_text(encoding="utf-8")
         return files
+
+    def _iter_markdown_paths(self) -> list[Path]:
+        return [
+            path
+            for path in self.root.rglob("*.md")
+            if path.is_file() and not self._is_ignored_path(path)
+        ]
+
+    def _read_note(self, file_path: Path) -> dict[str, Any]:
+        content = file_path.read_text(encoding="utf-8")
+        frontmatter, body = split_frontmatter(content)
+        return {
+            "path": self.relative(file_path),
+            "frontmatter": frontmatter,
+            "body": body,
+            "content": content,
+            "file": file_metadata(file_path),
+            "wikilinks": [link.__dict__ for link in wikilinks(body)],
+            "markdown_links": markdown_links(body),
+            "tags": sorted(set(frontmatter_tags(frontmatter) + inline_tags(body))),
+            "block_ids": block_ids(body),
+        }
 
     def _link_names_for(self, path: Path) -> set[str]:
         names = {path.stem}
@@ -470,7 +475,7 @@ class Vault:
 
     def _is_reserved_relative_path(self, path: Path) -> bool:
         return is_relative_to(path, clean_relative_path(self.settings.trash_path)) or is_relative_to(
-            path, Path(".obsidian-mcp")
+            path, Path(_STORAGE_DIR)
         )
 
     def _trash_dir(self) -> Path:

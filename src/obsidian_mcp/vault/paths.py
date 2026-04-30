@@ -1,17 +1,19 @@
 import os
 import secrets
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+UNSAFE_PATH_PARTS = {"", ".."}
 
 
 def clean_relative_path(path: str) -> Path:
     if not path or path == ".":
         return Path()
-    candidate = Path(path)
+    candidate = PurePosixPath(path)
     if candidate.is_absolute():
         raise ValueError("Vault paths must be relative")
-    if any(part in {"..", ""} for part in candidate.parts):
+    if any(part in UNSAFE_PATH_PARTS for part in candidate.parts):
         raise ValueError("Vault path contains unsafe segments")
-    return candidate
+    return Path(*candidate.parts)
 
 
 def ensure_markdown_extension(path: str) -> str:

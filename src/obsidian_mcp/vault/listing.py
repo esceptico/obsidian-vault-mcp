@@ -29,16 +29,24 @@ def sort_entries(
     sort_by: ListSortBy,
     sort_order: SortOrder,
 ) -> list[dict[str, Any]]:
-    if sort_by == ListSortBy.NAME:
-        reverse = sort_order == SortOrder.DESC
-        directories = [entry for entry in entries if entry["kind"] == EntryKind.DIRECTORY.value]
-        files = [entry for entry in entries if entry["kind"] == EntryKind.FILE.value]
-        return sorted(directories, key=_path_key, reverse=reverse) + sorted(files, key=_path_key, reverse=reverse)
-
     reverse = sort_order == SortOrder.DESC
-    with_value = [entry for entry in entries if entry[sort_by.value] is not None]
-    without_value = [entry for entry in entries if entry[sort_by.value] is None]
-    return sorted(with_value, key=lambda entry: (entry[sort_by.value], _path_key(entry)), reverse=reverse) + sorted(
+    if sort_by == ListSortBy.NAME:
+        return _sort_by_name(entries, reverse)
+
+    return _sort_by_metadata(entries, sort_by, reverse)
+
+
+def _sort_by_name(entries: list[dict[str, Any]], reverse: bool) -> list[dict[str, Any]]:
+    directories = [entry for entry in entries if entry["kind"] == EntryKind.DIRECTORY.value]
+    files = [entry for entry in entries if entry["kind"] == EntryKind.FILE.value]
+    return sorted(directories, key=_path_key, reverse=reverse) + sorted(files, key=_path_key, reverse=reverse)
+
+
+def _sort_by_metadata(entries: list[dict[str, Any]], sort_by: ListSortBy, reverse: bool) -> list[dict[str, Any]]:
+    key = sort_by.value
+    with_value = [entry for entry in entries if entry[key] is not None]
+    without_value = [entry for entry in entries if entry[key] is None]
+    return sorted(with_value, key=lambda entry: (entry[key], _path_key(entry)), reverse=reverse) + sorted(
         without_value,
         key=_path_key,
     )

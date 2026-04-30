@@ -22,6 +22,7 @@ from obsidian_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatte
 
 
 log = get_logger("search")
+VECTOR_DISABLED_WARNING = "Vector search is disabled; set OPENAI_API_KEY to enable embeddings."
 
 
 @dataclass(frozen=True)
@@ -67,11 +68,7 @@ class SearchIndex:
         Used by startup sync to backfill after a batch of upserts."""
         if not self.embeddings.enabled:
             return 0
-        all_records = self.store.all_records()
-        pending: list[tuple[int, RecordMeta]] = []
-        for meta in all_records.values():
-            if self._meta_needs_embedding(meta):
-                pending.append((meta.rowid, meta))
+        pending = self._pending_embedding_meta()
         if not pending:
             return 0
         # We need search_text + content_hash; pull them by re-reading via FTS.
@@ -93,21 +90,25 @@ class SearchIndex:
             raise ValueError(f"limit must be between 1 and {MAX_SEARCH_LIMIT}")
         if not query.strip():
             return {"hits": [], "warnings": []}
-        return _SEARCH_DISPATCH[mode](self, query, limit)
+        if mode == SearchMode.BM25:
+            return self._bm25_only(query, limit)
+        if mode == SearchMode.VECTOR:
+            return self._vector_only(query, limit)
+        return self._hybrid(query, limit)
 
     def _bm25_only(self, query: str, limit: int) -> dict:
         return {"hits": self._search_fts(query, limit), "warnings": []}
 
     def _vector_only(self, query: str, limit: int) -> dict:
         if not self.embeddings.enabled:
-            return {"hits": [], "warnings": [_VECTOR_DISABLED_WARNING]}
+            return {"hits": [], "warnings": [VECTOR_DISABLED_WARNING]}
         return {"hits": self._search_vectors(query, limit), "warnings": []}
 
     def _hybrid(self, query: str, limit: int) -> dict:
         candidate_limit = _candidate_limit(limit)
         fts_hits = self._search_fts(query, candidate_limit)
         if not self.embeddings.enabled:
-            return {"hits": fts_hits[:limit], "warnings": [_VECTOR_DISABLED_WARNING]}
+            return {"hits": fts_hits[:limit], "warnings": [VECTOR_DISABLED_WARNING]}
         vector_hits = self._search_vectors(query, candidate_limit)
         if not vector_hits:
             return {"hits": fts_hits[:limit], "warnings": ["Hybrid search returned SQLite FTS5 results only."]}
@@ -133,6 +134,13 @@ class SearchIndex:
         if self.embeddings.dimensions is not None and meta.embedded_dimensions != self.embeddings.dimensions:
             return True
         return False
+
+    def _pending_embedding_meta(self) -> list[tuple[int, RecordMeta]]:
+        return [
+            (meta.rowid, meta)
+            for meta in self.store.all_records().values()
+            if self._meta_needs_embedding(meta)
+        ]
 
     def _embed_and_store(self, items: list[tuple[int, StoredNote]]) -> int:
         """items: list of (rowid, StoredNote). Embeds in batches and writes
@@ -168,6 +176,11 @@ class SearchIndex:
     def _embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        request = self._embedding_request(texts)
+        response = self._client().embeddings.create(**request)
+        return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+
+    def _embedding_request(self, texts: list[str]) -> dict:
         request: dict = {
             "model": self.embeddings.model,
             "input": texts,
@@ -175,17 +188,7 @@ class SearchIndex:
         }
         if self.embeddings.dimensions is not None:
             request["dimensions"] = self.embeddings.dimensions
-        response = self._client().embeddings.create(**request)
-        return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
-
-
-_VECTOR_DISABLED_WARNING = "Vector search is disabled; set OPENAI_API_KEY to enable embeddings."
-
-_SEARCH_DISPATCH = {
-    SearchMode.BM25: SearchIndex._bm25_only,
-    SearchMode.VECTOR: SearchIndex._vector_only,
-    SearchMode.HYBRID: SearchIndex._hybrid,
-}
+        return request
 
 
 def _stored_note(note: IndexedNote) -> StoredNote:
