@@ -1,6 +1,6 @@
 import unittest
 
-from obsidian_mcp.markdown.frontmatter import patch_frontmatter, split_frontmatter
+from obsidian_mcp.markdown.frontmatter import frontmatter_tags, patch_frontmatter, split_frontmatter
 
 
 class FrontmatterTests(unittest.TestCase):
@@ -55,6 +55,25 @@ class FrontmatterTests(unittest.TestCase):
         self.assertIn("2024-01-15", encoded)
         self.assertIn("2024-01-15T09:30:00", encoded)
         self.assertIn("2025-12-31", encoded)
+
+    def test_split_frontmatter_returns_plain_nested_dicts(self) -> None:
+        fm, _ = split_frontmatter("---\nnested:\n  key: value\nitems:\n  - a\n---\nbody")
+
+        self.assertIs(type(fm), dict)
+        self.assertIs(type(fm["nested"]), dict)
+        self.assertEqual(fm["items"], ["a"])
+
+    def test_closing_fence_must_be_exact_line(self) -> None:
+        content = "---\ntitle: bad\n----\nbody"
+
+        fm, body = split_frontmatter(content)
+
+        self.assertEqual(fm, {})
+        self.assertEqual(body, content)
+
+    def test_frontmatter_tags_normalizes_common_obsidian_shapes(self) -> None:
+        self.assertEqual(frontmatter_tags({"tags": "#project/dex, tag  #daily"}), ["project/dex", "tag", "daily"])
+        self.assertEqual(frontmatter_tags({"tags": ["#a", " b ", None, ""]}), ["a", "b"])
 
 
 if __name__ == "__main__":
