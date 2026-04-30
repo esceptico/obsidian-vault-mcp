@@ -83,6 +83,90 @@ Daemon state is stored at:
 ~/Library/Application Support/obsidian-mcp/
 ```
 
+## Remote Access via Cloudflare Tunnel
+
+To expose the server over HTTPS without opening ports, use a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/).
+
+### One-time setup
+
+```bash
+brew install cloudflared
+cloudflared tunnel login
+cloudflared tunnel create obsidian-mcp
+cloudflared tunnel route dns obsidian-mcp vault.example.com
+```
+
+Create `~/.cloudflared/config.yml`:
+
+```yaml
+tunnel: <TUNNEL_ID>
+credentials-file: /Users/<you>/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: vault.example.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404
+```
+
+Test it:
+
+```bash
+cloudflared tunnel run obsidian-mcp
+```
+
+Always keep `OBSIDIAN_MCP_AUTH_TOKEN` set when exposing the tunnel publicly. Clients must send `Authorization: Bearer <token>`.
+
+### Run as a background service (macOS, launchd)
+
+Create `~/Library/LaunchAgents/com.user.cloudflared.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.user.cloudflared</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/cloudflared</string>
+    <string>tunnel</string>
+    <string>run</string>
+    <string>obsidian-mcp</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/cloudflared.log</string>
+  <key>StandardErrorPath</key><string>/tmp/cloudflared.log</string>
+</dict>
+</plist>
+```
+
+Load it:
+
+```bash
+launchctl load -w ~/Library/LaunchAgents/com.user.cloudflared.plist
+```
+
+Manage it:
+
+```bash
+launchctl list | grep cloudflared
+launchctl unload ~/Library/LaunchAgents/com.user.cloudflared.plist
+tail -f /tmp/cloudflared.log
+```
+
+The tunnel will now start automatically on login and restart on crash.
+
+### Run as a background service (Linux, systemd)
+
+```bash
+sudo cloudflared service install
+```
+
+This generates a systemd unit reading from `/etc/cloudflared/config.yml`.
+
+
 ## Notes
 
 `vault_search(mode="hybrid")` combines SQLite FTS5 and OpenAI embeddings when `OPENAI_API_KEY` or `OBSIDIAN_MCP_OPENAI_API_KEY` is set. Without an API key, hybrid search falls back to FTS5 and returns a warning.
