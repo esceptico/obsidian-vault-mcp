@@ -216,7 +216,7 @@ class VaultTests(unittest.TestCase):
         from unittest.mock import patch
 
         tmp, vault = self.make_vault()
-        with tmp, patch("obsidian_mcp.vault.service.MAX_NOTE_BYTES", 20):
+        with tmp, patch("obsidian_mcp.vault.notes.MAX_NOTE_BYTES", 20):
             with self.assertRaises(ValueError):
                 self._create(vault, "Big", "body", {"long": "x" * 40})
 
@@ -224,7 +224,7 @@ class VaultTests(unittest.TestCase):
         from unittest.mock import patch
 
         tmp, vault = self.make_vault()
-        with tmp, patch("obsidian_mcp.vault.service.MAX_NOTE_BYTES", 40):
+        with tmp, patch("obsidian_mcp.vault.notes.MAX_NOTE_BYTES", 40):
             self._create(vault, "Note", "body")
             with self.assertRaises(ValueError):
                 vault.update_note("Note.md", content=None, frontmatter_patch={"long": "x" * 80})

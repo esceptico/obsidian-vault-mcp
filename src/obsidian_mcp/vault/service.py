@@ -7,40 +7,27 @@ from typing import Any
 
 from obsidian_mcp.core.config import EmbeddingSettings, VaultSettings
 from obsidian_mcp.core.constants import (
-    MAX_FRONTMATTER_DEPTH,
-    MAX_NOTE_BYTES,
     MAX_SEARCH_LIMIT,
     TRASH_TIMESTAMP_FORMAT,
     WATCHER_DEBOUNCE_SECONDS,
 )
-from obsidian_mcp.markdown.frontmatter import (
-    frontmatter_tags,
-    patch_frontmatter,
-    render_frontmatter,
-    split_frontmatter,
-    split_frontmatter_raw,
-)
-from obsidian_mcp.markdown.obsidian import (
-    block_ids,
-    inline_tags,
-    markdown_links,
-    rewrite_wikilink_targets,
-    wikilinks,
-)
+from obsidian_mcp.markdown.obsidian import wikilinks
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
 from obsidian_mcp.index.search import IndexedNote, SearchIndex
-from obsidian_mcp.vault.listing import entry_for, file_metadata, sort_entries
+from obsidian_mcp.vault.links import link_names_for, plan_wikilink_rewrites
+from obsidian_mcp.vault.listing import entry_for, sort_entries
+from obsidian_mcp.vault.notes import read_note, render_new_note, render_updated_note
 from obsidian_mcp.vault.paths import (
     clean_relative_path,
     ensure_markdown_extension,
-    is_relative_to,
     temporary_write_path,
 )
+from obsidian_mcp.vault.policy import STORAGE_DIR, is_ignored_relative_path
+from obsidian_mcp.vault.sync import sync_index
 from obsidian_mcp.vault.watcher import VaultWatcher
 
 log = get_logger("vault")
-_STORAGE_DIR = ".obsidian-mcp"
 
 
 class Vault:
@@ -49,7 +36,7 @@ class Vault:
         self.root = settings.root.resolve()
         if not self.root.exists() or not self.root.is_dir():
             raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
-        self._index = SearchIndex(self.root / _STORAGE_DIR / "index.sqlite", embeddings or EmbeddingSettings())
+        self._index = SearchIndex(self.root / STORAGE_DIR / "index.sqlite", embeddings or EmbeddingSettings())
         self._lock = threading.RLock()
         self._watcher: VaultWatcher | None = None
         # Reconcile the index against disk at startup so the first search
@@ -132,7 +119,7 @@ class Vault:
             raise ValueError(f"Not a file: {path}")
         if self._is_ignored_path(file_path):
             raise ValueError(f"Refusing to read hidden path: {path}")
-        return self._read_note(file_path)
+        return read_note(self.root, file_path)
 
     def create_note(
         self,
@@ -141,15 +128,12 @@ class Vault:
         frontmatter: dict[str, Any] | None,
         overwrite: bool,
     ) -> dict[str, Any]:
-        _check_size(content)
-        _check_frontmatter_depth(frontmatter or {})
         with self._lock:
             note_path = self.resolve_for_write(ensure_markdown_extension(path))
             if note_path.exists() and not overwrite:
                 raise FileExistsError(f"Refusing to overwrite existing note: {path}")
             note_path.parent.mkdir(parents=True, exist_ok=True)
-            rendered = render_frontmatter(frontmatter or {}, content)
-            _check_size(rendered)
+            rendered = render_new_note(content, frontmatter)
             self._atomic_write(note_path, rendered)
             rel = self.relative(note_path)
             self._index.upsert_note(IndexedNote(path=rel, content=rendered))
@@ -162,23 +146,12 @@ class Vault:
         content: str | None,
         frontmatter_patch: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        if content is not None:
-            _check_size(content)
-        if frontmatter_patch:
-            _check_frontmatter_depth(frontmatter_patch)
         with self._lock:
             note_path = self.resolve(path)
             if not note_path.is_file():
                 raise ValueError(f"Not a file: {path}")
             existing = note_path.read_text(encoding="utf-8")
-            _, body = split_frontmatter(existing)
-            next_content = existing
-            if content is not None:
-                current_frontmatter, _ = split_frontmatter_raw(existing)
-                next_content = render_frontmatter(current_frontmatter, content)
-            if frontmatter_patch:
-                next_content = patch_frontmatter(next_content, frontmatter_patch)
-            _check_size(next_content)
+            next_content, previous_body = render_updated_note(existing, content, frontmatter_patch)
             changed = next_content != existing
             if changed:
                 self._atomic_write(note_path, next_content)
@@ -189,7 +162,7 @@ class Vault:
                 "ok": True,
                 "path": self.relative(note_path),
                 "changed": changed,
-                "previous_body": body,
+                "previous_body": previous_body,
             }
 
     def move_path(self, source: str, destination: str, rewrite_links: bool, overwrite: bool) -> dict[str, Any]:
@@ -212,36 +185,16 @@ class Vault:
 
         old_rel = self._relative_str(src)
         old_names = self._link_names_for(src)
-        is_note_rename = (
-            rewrite_links and src.suffix == ".md" and dst.suffix == ".md" and bool(old_names)
-        )
-
-        pending_rewrites: list[tuple[Path, str]] = []
-        if is_note_rename:
-            new_bare = dst.stem
-            new_qualified = Path(self._relative_str(dst)).with_suffix("").as_posix()
-            same_stem_exists = any(
-                other.is_file()
-                and other.suffix == ".md"
-                and other.stem == new_bare
-                and other.resolve() != src.resolve()
-                and other.resolve() != dst.resolve()
-                and not self._is_ignored_path(other)
-                for other in self.root.rglob("*.md")
+        pending_rewrites = []
+        if rewrite_links and src.suffix == ".md" and dst.suffix == ".md" and old_names:
+            pending_rewrites = plan_wikilink_rewrites(
+                root=self.root,
+                src=src,
+                dst=dst,
+                old_names=old_names,
+                relative_str=self._relative_str,
+                is_ignored=self._is_ignored_path,
             )
-
-            def replacement_for(matched_old: str) -> str:
-                if "/" in matched_old or same_stem_exists:
-                    return new_qualified
-                return new_bare
-
-            for path in self.root.rglob("*.md"):
-                if not path.is_file() or self._is_ignored_path(path):
-                    continue
-                original = path.read_text(encoding="utf-8")
-                updated = rewrite_wikilink_targets(original, old_names, replacement_for)
-                if updated != original:
-                    pending_rewrites.append((path, updated))
 
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
@@ -349,41 +302,16 @@ class Vault:
         """
         with self._lock:
             on_disk = self._markdown_files()
-
-            indexed = self._index.store.all_records()
-            added = modified = unchanged = removed = 0
-
-            for rel, content in on_disk.items():
-                note = IndexedNote(path=rel, content=content)
-                if rel not in indexed:
-                    self._index.upsert_note(note, embed=False)
-                    added += 1
-                    continue
-                # Skip the upsert entirely when content hasn't changed.
-                if self._index.content_hash_for(note) == indexed[rel].content_hash:
-                    unchanged += 1
-                else:
-                    self._index.upsert_note(note, embed=False)
-                    modified += 1
-
-            for rel in set(indexed) - set(on_disk):
-                self._index.delete_note(rel)
-                removed += 1
-
-            # Batch every newly-indexed/modified record into one embedding pass.
-            embedded = self._index.embed_pending()
-
+            summary = sync_index(self._index, on_disk)
             log.info(
                 "sync_from_disk +%d ~%d -%d (unchanged=%d, embedded=%d)",
-                added, modified, removed, unchanged, embedded,
+                summary["added"],
+                summary["modified"],
+                summary["removed"],
+                summary["unchanged"],
+                summary["embedded"],
             )
-            return {
-                "added": added,
-                "modified": modified,
-                "removed": removed,
-                "unchanged": unchanged,
-                "embedded": embedded,
-            }
+            return summary
 
     def backlinks(self, path: str) -> dict[str, Any]:
         target = self.resolve(path)
@@ -456,44 +384,15 @@ class Vault:
             if path.is_file() and not self._is_ignored_path(path)
         ]
 
-    def _read_note(self, file_path: Path) -> dict[str, Any]:
-        content = file_path.read_text(encoding="utf-8")
-        frontmatter, body = split_frontmatter(content)
-        return {
-            "path": self.relative(file_path),
-            "frontmatter": frontmatter,
-            "body": body,
-            "content": content,
-            "file": file_metadata(file_path),
-            "wikilinks": [link.__dict__ for link in wikilinks(body)],
-            "markdown_links": markdown_links(body),
-            "tags": sorted(set(frontmatter_tags(frontmatter) + inline_tags(body))),
-            "block_ids": block_ids(body),
-        }
-
     def _link_names_for(self, path: Path) -> set[str]:
-        names = {path.stem}
-        if path.suffix == ".md":
-            relative = self.relative(path)
-            names.add(Path(relative).with_suffix("").as_posix())
-            names.add(relative)
-        return names
+        return link_names_for(self.relative(path), path.stem, path.suffix)
 
     def _is_ignored_path(self, path: Path) -> bool:
         relative = path.relative_to(self.root)
         return self._is_ignored_relative_path(relative, is_directory=path.is_dir())
 
     def _is_ignored_relative_path(self, path: Path, *, is_directory: bool) -> bool:
-        return self._is_reserved_relative_path(path) or self._has_dot_directory(path, is_directory)
-
-    def _is_reserved_relative_path(self, path: Path) -> bool:
-        return is_relative_to(path, clean_relative_path(self.settings.trash_path)) or is_relative_to(
-            path, Path(_STORAGE_DIR)
-        )
-
-    def _has_dot_directory(self, path: Path, is_directory: bool) -> bool:
-        parts = path.parts if is_directory else path.parts[:-1]
-        return any(part.startswith(".") for part in parts)
+        return is_ignored_relative_path(path, trash_path=self.settings.trash_path, is_directory=is_directory)
 
     def _trash_dir(self) -> Path:
         clean = clean_relative_path(self.settings.trash_path)
@@ -517,22 +416,6 @@ class Vault:
                 except OSError:
                     pass
             raise
-
-
-def _check_size(content: str) -> None:
-    if len(content.encode("utf-8")) > MAX_NOTE_BYTES:
-        raise ValueError(f"Note content exceeds {MAX_NOTE_BYTES} bytes")
-
-
-def _check_frontmatter_depth(value: Any, depth: int = 0) -> None:
-    if depth > MAX_FRONTMATTER_DEPTH:
-        raise ValueError(f"Frontmatter exceeds max depth ({MAX_FRONTMATTER_DEPTH})")
-    if isinstance(value, dict):
-        for v in value.values():
-            _check_frontmatter_depth(v, depth + 1)
-    elif isinstance(value, (list, tuple)):
-        for v in value:
-            _check_frontmatter_depth(v, depth + 1)
 
 
 _DELETE_DISPATCH = {

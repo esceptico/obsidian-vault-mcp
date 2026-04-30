@@ -1,5 +1,4 @@
 import os
-from typing import Any
 
 import click
 
@@ -64,46 +63,8 @@ def search(query: str, limit: int) -> None:
     click.echo(vault.search(query, limit=limit, mode=SearchMode.BM25))
 
 
-def main(args: Any | None = None) -> None:
-    if args is not None:
-        run_namespace(args)
-        return
+def main() -> None:
     cli()
-
-
-def run_namespace(args: Any) -> None:
-    if args.command == "run":
-        run_server(args.host, args.port)
-        return
-
-    if args.command == "start":
-        from obsidian_mcp.app.daemon import start_daemon
-
-        print(f"started, pid={start_daemon(args.host, args.port)}")
-        return
-
-    if args.command == "stop":
-        from obsidian_mcp.app.daemon import stop_daemon
-
-        print(stop_daemon(args.timeout) if args.timeout is not None else stop_daemon())
-        return
-
-    if args.command == "status":
-        from obsidian_mcp.app.daemon import daemon_status
-
-        print(daemon_status(args.host, args.port))
-        return
-
-    if args.command == "logs":
-        from obsidian_mcp.app.daemon import show_logs
-
-        show_logs(args.follow)
-        return
-
-    if args.command == "search":
-        settings = load_settings()
-        vault = Vault(settings.vault, settings.embeddings)
-        print(vault.search(args.query, limit=args.limit, mode=SearchMode.BM25))
 
 
 def run_server(host: str | None, port: int | None) -> None:
