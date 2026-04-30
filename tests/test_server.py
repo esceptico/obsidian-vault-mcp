@@ -155,6 +155,21 @@ class ToolSchemaTests(unittest.TestCase):
         self.assertEqual(tools["vault_create_note"].inputSchema["required"], ["path", "content"])
         self.assertEqual(tools["vault_update_note"].inputSchema["required"], ["path"])
 
+    def test_tool_output_schemas_do_not_force_stale_structured_shapes(self) -> None:
+        tools = self._tools()
+        for name in [
+            "vault_list",
+            "vault_read",
+            "vault_search",
+            "vault_create_note",
+            "vault_update_note",
+            "vault_move_path",
+            "vault_delete_path",
+            "vault_backlinks",
+            "vault_reindex",
+        ]:
+            self.assertIsNone(tools[name].outputSchema, name)
+
     def test_tool_annotations_mark_read_only_tools(self) -> None:
         tools = self._tools()
         for name in ["vault_list", "vault_read", "vault_search", "vault_backlinks"]:
