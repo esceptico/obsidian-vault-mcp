@@ -206,6 +206,10 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
             "sort_by": ListSortBy(sort_by).value,
             "sort_order": SortOrder(sort_order).value,
             "entries": entries,
+            # Backward compatibility for clients that cached the old
+            # list[dict] output schema inferred by FastMCP. That schema
+            # wrapped the list under a required "result" key.
+            "result": entries,
         }
         return text_result(
             format_list(path, entries, ListSortBy(sort_by), SortOrder(sort_order)),

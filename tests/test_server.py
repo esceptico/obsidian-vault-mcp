@@ -237,6 +237,7 @@ class ToolResultTests(unittest.TestCase):
         self.assertIn("Found 1 entries", result.content[0].text)
         self.assertEqual(result.structuredContent["path"], "")
         self.assertEqual(result.structuredContent["entries"][0]["path"], "Alpha.md")
+        self.assertEqual(result.structuredContent["result"], result.structuredContent["entries"])
 
     def test_read_returns_note_markdown_and_structured_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
