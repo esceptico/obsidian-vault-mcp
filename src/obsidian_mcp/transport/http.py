@@ -9,7 +9,13 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from obsidian_mcp.core.config import ServerSettings, load_settings
-from obsidian_mcp.core.constants import DEFAULT_LIST_LIMIT, DEFAULT_SEARCH_LIMIT, LOOPBACK_HOSTS, MAX_LIST_LIMIT
+from obsidian_mcp.core.constants import (
+    DEFAULT_LIST_LIMIT,
+    DEFAULT_SEARCH_LIMIT,
+    LOOPBACK_HOSTS,
+    MAX_LIST_LIMIT,
+    MAX_SEARCH_LIMIT,
+)
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
 from obsidian_mcp.transport.formatters import (
@@ -191,7 +197,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
 
     @mcp.tool(annotations=_READ_ONLY, structured_output=False)
     def vault_list(
-        path: str,
+        path: str = "",
         sort_by: ListSortBy = ListSortBy.NAME,
         sort_order: SortOrder = SortOrder.ASC,
         limit: int = DEFAULT_LIST_LIMIT,
@@ -199,7 +205,7 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     ) -> CallToolResult:
         """List files and directories with size/created_at/modified_at metadata.
 
-        Pass "" for the vault root. Sort with sort_by=name|modified_at|created_at|size
+        Omit path for the vault root. Sort with sort_by=name|modified_at|created_at|size
         and sort_order=asc|desc. Page with limit and offset.
         Returns Markdown text plus structuredContent entries.
         """
@@ -241,13 +247,35 @@ def _register_tools(mcp: FastMCP, vault: Vault) -> None:
     def vault_search(
         query: str,
         limit: int = DEFAULT_SEARCH_LIMIT,
+        offset: int = 0,
         mode: SearchMode = SearchMode.HYBRID,
     ) -> CallToolResult:
-        """Search vault notes. Returns Markdown hits plus structuredContent data."""
+        """Search vault notes. Page with limit and offset. Returns Markdown plus structuredContent."""
+        if limit < 1 or limit > MAX_SEARCH_LIMIT:
+            raise ValueError(f"limit must be between 1 and {MAX_SEARCH_LIMIT}")
+        if offset < 0:
+            raise ValueError("offset must be greater than or equal to 0")
         search_mode = SearchMode(mode)
-        result = vault.search(query, limit, search_mode)
-        structured = {"query": query, "limit": limit, "mode": search_mode.value, **result}
-        return text_result(format_search(query, search_mode, result), structured)
+        requested = min(MAX_SEARCH_LIMIT, offset + limit + 1)
+        result = vault.search(query, requested, search_mode)
+        all_hits = result.get("hits") or []
+        hits = all_hits[offset : offset + limit]
+        next_offset = offset + len(hits) if offset + len(hits) < len(all_hits) else None
+        paged = {
+            "hits": hits,
+            "warnings": result.get("warnings") or [],
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
+        }
+        structured = {
+            "query": query,
+            "limit": limit,
+            "offset": offset,
+            "returned": len(hits),
+            "mode": search_mode.value,
+            **paged,
+        }
+        return text_result(format_search(query, search_mode, paged, offset, limit), structured)
 
     @mcp.tool(annotations=_CREATE_NOTE, structured_output=False)
     def vault_create_note(

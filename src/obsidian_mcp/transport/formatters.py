@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 
 from mcp.types import CallToolResult, TextContent
@@ -50,7 +51,7 @@ def format_list(
             f"`{_inline_code(str(entry['path']))}` | "
             f"{entry['kind']} | "
             f"{_format_bytes(entry.get('size'))} | "
-            f"{entry.get('modified_at') or ''} |"
+            f"{_format_timestamp(entry.get('modified_at'))} |"
         )
     return "\n".join(lines)
 
@@ -60,9 +61,9 @@ def format_read(result: dict[str, Any]) -> str:
     file_meta = result.get("file") or {}
     metadata = []
     if file_meta.get("modified_at"):
-        metadata.append(f"Modified: {file_meta['modified_at']}")
+        metadata.append(f"Modified: {_format_timestamp(file_meta['modified_at'])}")
     if file_meta.get("created_at"):
-        metadata.append(f"Created: {file_meta['created_at']}")
+        metadata.append(f"Created: {_format_timestamp(file_meta['created_at'])}")
     if file_meta.get("size") is not None:
         metadata.append(f"Size: {_format_bytes(file_meta['size'])}")
     if result.get("tags"):
@@ -77,13 +78,16 @@ def format_read(result: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip()
 
 
-def format_search(query: str, mode: SearchMode, result: dict[str, Any]) -> str:
+def format_search(query: str, mode: SearchMode, result: dict[str, Any], offset: int, limit: int) -> str:
     hits = result.get("hits") or []
     warnings = result.get("warnings") or []
     if not hits:
         lines = [f"No matches found for `{_inline_code(query)}` using `{mode.value}` search."]
     else:
-        lines = [f"Found {len(hits)} matches for `{_inline_code(query)}` using `{mode.value}` search."]
+        end = offset + len(hits)
+        lines = [f"Showing matches {offset + 1}-{end} for `{_inline_code(query)}` using `{mode.value}` search."]
+        if result.get("has_more"):
+            lines.append(f"More matches may be available. Use `offset={end}` with `limit={limit}`.")
 
     for warning in warnings:
         lines.append(f"Warning: {warning}")
@@ -167,6 +171,47 @@ def _format_bytes(value: Any) -> str:
     if value < 1024 * 1024:
         return f"{value / 1024:.1f} KiB"
     return f"{value / (1024 * 1024):.1f} MiB"
+
+
+def _format_timestamp(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    parsed = parsed.astimezone(timezone.utc)
+    compact = parsed.strftime("%Y-%m-%d %H:%M UTC")
+    relative = _relative_timestamp(parsed)
+    if relative:
+        return f"{relative} ({compact})"
+    return compact
+
+
+def _relative_timestamp(value: datetime) -> str:
+    delta = datetime.now(timezone.utc) - value
+    seconds = int(delta.total_seconds())
+    if seconds < 0:
+        return ""
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return _plural(minutes, "minute") + " ago"
+    hours = minutes // 60
+    if hours < 48:
+        return _plural(hours, "hour") + " ago"
+    days = hours // 24
+    if days < 60:
+        return _plural(days, "day") + " ago"
+    return ""
+
+
+def _plural(value: int, unit: str) -> str:
+    suffix = "" if value == 1 else "s"
+    return f"{value} {unit}{suffix}"
 
 
 def _inline_code(value: str) -> str:

@@ -154,9 +154,13 @@ class ToolSchemaTests(unittest.TestCase):
         tools = self._tools()
         self.assertEqual(tools["vault_create_note"].inputSchema["required"], ["path", "content"])
         self.assertEqual(tools["vault_update_note"].inputSchema["required"], ["path"])
-        self.assertEqual(tools["vault_list"].inputSchema["required"], ["path"])
+        self.assertEqual(tools["vault_list"].inputSchema.get("required", []), [])
+        self.assertEqual(tools["vault_list"].inputSchema["properties"]["path"]["default"], "")
         self.assertEqual(tools["vault_list"].inputSchema["properties"]["limit"]["default"], 50)
         self.assertEqual(tools["vault_list"].inputSchema["properties"]["offset"]["default"], 0)
+        self.assertEqual(tools["vault_search"].inputSchema["required"], ["query"])
+        self.assertEqual(tools["vault_search"].inputSchema["properties"]["limit"]["default"], 10)
+        self.assertEqual(tools["vault_search"].inputSchema["properties"]["offset"]["default"], 0)
 
     def test_tool_output_schemas_do_not_force_stale_structured_shapes(self) -> None:
         tools = self._tools()
@@ -221,11 +225,31 @@ class ToolResultTests(unittest.TestCase):
             result = asyncio.run(call_search())
 
         self.assertEqual(result.content[0].type, "text")
-        self.assertIn("Found 1 matches", result.content[0].text)
+        self.assertIn("Showing matches 1-1", result.content[0].text)
         self.assertIn("`Note.md`", result.content[0].text)
         self.assertEqual(result.structuredContent["query"], "semantic")
         self.assertEqual(result.structuredContent["mode"], "bm25")
         self.assertEqual(result.structuredContent["hits"][0]["path"], "Note.md")
+
+    def test_search_pages_results(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "Alpha.md").write_text("semantic alpha", encoding="utf-8")
+            Path(tmp, "Beta.md").write_text("semantic beta", encoding="utf-8")
+            mcp = self._mcp(tmp)
+
+            async def call_search():
+                return await mcp.call_tool(
+                    "vault_search",
+                    {"query": "semantic", "mode": "bm25", "limit": 1, "offset": 1},
+                )
+
+            result = asyncio.run(call_search())
+
+        self.assertIn("Showing matches 2-2", result.content[0].text)
+        self.assertEqual(result.structuredContent["limit"], 1)
+        self.assertEqual(result.structuredContent["offset"], 1)
+        self.assertEqual(result.structuredContent["returned"], 1)
+        self.assertEqual(len(result.structuredContent["hits"]), 1)
 
     def test_list_pages_entries_and_wraps_structured_content(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,7 +260,7 @@ class ToolResultTests(unittest.TestCase):
             async def call_list():
                 return await mcp.call_tool(
                     "vault_list",
-                    {"path": "", "sort_by": "name", "sort_order": "asc", "limit": 1, "offset": 1},
+                    {"sort_by": "name", "sort_order": "asc", "limit": 1, "offset": 1},
                 )
 
             result = asyncio.run(call_list())
@@ -250,6 +274,8 @@ class ToolResultTests(unittest.TestCase):
         self.assertIsNone(result.structuredContent["next_offset"])
         self.assertEqual(result.structuredContent["entries"][0]["path"], "Beta.md")
         self.assertEqual(result.structuredContent["result"], result.structuredContent["entries"])
+        self.assertRegex(result.content[0].text, r"(just now|\\d+ minute[s]? ago|\\d+ hour[s]? ago)")
+        self.assertIn("UTC", result.content[0].text)
 
     def test_list_reports_next_offset_when_more_entries_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
