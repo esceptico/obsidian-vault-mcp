@@ -40,6 +40,29 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(hybrid["hits"][0]["path"], "AI.md")
         self.assertEqual(hybrid["hits"][0]["source"], "hybrid")
 
+    def test_long_notes_embed_multiple_chunks_without_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            index = SearchIndex(
+                Path(tmp) / "index.sqlite",
+                EmbeddingSettings(api_key="test-key", model="text-embedding-3-small", batch_size=10),
+            )
+            embedded_inputs: list[str] = []
+
+            def embed(texts: list[str]) -> list[list[float]]:
+                embedded_inputs.extend(texts)
+                return [[1.0, 0.0] if "late semantic marker" in text else [0.0, 1.0] for text in texts]
+
+            content = "# Long\n" + ("early filler sentence. " * 400) + "\n\n## Late\nlate semantic marker"
+            with patch.object(index, "_embed_texts", side_effect=embed):
+                index.upsert_note(IndexedNote(path="Long.md", content=content))
+                hits = index.search("late semantic marker", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR)["hits"]
+
+        note_embedding_inputs = [text for text in embedded_inputs if text.startswith("Path: Long.md")]
+        self.assertGreater(len(note_embedding_inputs), 1)
+        self.assertTrue(any("late semantic marker" in text for text in note_embedding_inputs))
+        self.assertEqual(hits[0]["path"], "Long.md")
+        self.assertEqual(hits[0]["heading"], "Long > Late")
+
     def test_openai_client_is_reused(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             idx = SearchIndex(

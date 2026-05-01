@@ -50,9 +50,11 @@ OPENAI_MAX_RETRIES = 3
 EMBEDDING_TIMEOUT_SECONDS = 30.0
 """Per-request timeout for embedding calls."""
 
-EMBEDDING_MAX_INPUT_CHARS = 24_000
-"""Character cap fed to the embedding model. Notes longer than this still get
-FTS-indexed in full; only the embedding input is shortened."""
+EMBEDDING_CHUNK_TARGET_CHARS = 4_000
+"""Target Markdown chunk size for embedding and chunk-level FTS rows."""
+
+EMBEDDING_CHUNK_OVERLAP_CHARS = 500
+"""Overlap used only when a Markdown section is too large for one chunk."""
 
 
 # --- Server ------------------------------------------------------------------

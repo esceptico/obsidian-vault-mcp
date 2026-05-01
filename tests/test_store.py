@@ -5,20 +5,64 @@ from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 
-from obsidian_mcp.index.store import SearchStore, StoredNote
+import hashlib
+
+from obsidian_mcp.index.store import SearchStore, StoredChunk, StoredNote
 
 
 def _note(**overrides) -> StoredNote:
+    path = overrides.get("path", "Alpha.md")
+    title = overrides.get("title", "Alpha")
+    frontmatter_json = overrides.get("frontmatter_json", "{}")
+    body = overrides.get("body", "alpha body")
+    tags_text = overrides.get("tags_text", "")
+    search_text = overrides.get("search_text", f"{title} {body}")
+    content_hash = overrides.get("content_hash", "hash-1")
+    chunk = _chunk(
+        path=path,
+        title=title,
+        frontmatter_json=frontmatter_json,
+        body=body,
+        tags_text=tags_text,
+        search_text=search_text,
+    )
     base = StoredNote(
-        path="Alpha.md",
-        title="Alpha",
-        frontmatter_json="{}",
-        body="alpha body",
-        tags_text="",
-        search_text="Alpha alpha body",
-        content_hash="hash-1",
+        path=path,
+        title=title,
+        frontmatter_json=frontmatter_json,
+        body=body,
+        tags_text=tags_text,
+        search_text=search_text,
+        content_hash=content_hash,
+        chunks=(chunk,),
     )
     return replace(base, **overrides)
+
+
+def _chunk(
+    *,
+    path: str = "Alpha.md",
+    title: str = "Alpha",
+    frontmatter_json: str = "{}",
+    body: str = "alpha body",
+    tags_text: str = "",
+    search_text: str = "Alpha alpha body",
+    chunk_index: int = 0,
+    heading_path: str = "",
+) -> StoredChunk:
+    return StoredChunk(
+        path=path,
+        title=title,
+        frontmatter_json=frontmatter_json,
+        tags_text=tags_text,
+        chunk_index=chunk_index,
+        chunk_hash=hashlib.sha256(search_text.encode("utf-8")).hexdigest(),
+        heading_path=heading_path,
+        text=body,
+        search_text=search_text,
+        start_char=0,
+        end_char=len(body),
+    )
 
 
 class StoreTests(unittest.TestCase):
@@ -29,6 +73,7 @@ class StoreTests(unittest.TestCase):
             hits = store.search_fts('"semantic"', 10)
         self.assertEqual(hits[0].path, "Alpha.md")
         self.assertEqual(hits[0].title, "Alpha")
+        self.assertEqual(hits[0].chunk_index, 0)
 
     def test_upsert_is_idempotent_when_hash_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -65,10 +110,15 @@ class StoreTests(unittest.TestCase):
     def test_vector_upsert_and_knn_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SearchStore(Path(tmp) / "i.sqlite")
-            ai_id = store.upsert_note(_note(path="AI.md", title="AI", search_text="AI", body="ai", content_hash="ai-h"))
-            food_id = store.upsert_note(_note(path="Food.md", title="Food", search_text="Food", body="food", content_hash="food-h"))
+            store.upsert_note(_note(path="AI.md", title="AI", search_text="AI", body="ai", content_hash="ai-h"))
+            store.upsert_note(_note(path="Food.md", title="Food", search_text="Food", body="food", content_hash="food-h"))
+            pending = store.pending_embedding_chunks("m", None)
+            by_path = {chunk.search_text: chunk for chunk in pending}
             store.upsert_embeddings(
-                [(ai_id, "ai-h", [1.0, 0.0]), (food_id, "food-h", [0.0, 1.0])],
+                [
+                    (by_path["AI"].rowid, by_path["AI"].chunk_hash, [1.0, 0.0]),
+                    (by_path["Food"].rowid, by_path["Food"].chunk_hash, [0.0, 1.0]),
+                ],
                 model="m",
                 dimensions=2,
             )
@@ -80,8 +130,9 @@ class StoreTests(unittest.TestCase):
     def test_changing_content_hash_drops_stale_embedding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SearchStore(Path(tmp) / "i.sqlite")
-            rowid = store.upsert_note(_note(content_hash="h1"))
-            store.upsert_embeddings([(rowid, "h1", [1.0, 0.0])], model="m", dimensions=2)
+            store.upsert_note(_note(content_hash="h1"))
+            chunk = store.pending_embedding_chunks("m", None)[0]
+            store.upsert_embeddings([(chunk.rowid, chunk.chunk_hash, [1.0, 0.0])], model="m", dimensions=2)
             self.assertEqual(len(store.search_vectors([1.0, 0.0], 5, "m", 2)), 1)
 
             # Re-upsert with new content_hash; embedding should be evicted.
@@ -120,14 +171,15 @@ class StoreTests(unittest.TestCase):
     def test_dim_mismatch_recreates_vec_table_and_clears_meta(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SearchStore(Path(tmp) / "i.sqlite")
-            rowid = store.upsert_note(_note())
-            store.upsert_embeddings([(rowid, "hash-1", [1.0, 0.0])], model="m", dimensions=2)
+            store.upsert_note(_note())
+            chunk = store.pending_embedding_chunks("m", None)[0]
+            store.upsert_embeddings([(chunk.rowid, chunk.chunk_hash, [1.0, 0.0])], model="m", dimensions=2)
             self.assertEqual(len(store.search_vectors([1.0, 0.0], 5, "m", 2)), 1)
 
             # Switching dim from 2 to 3 must drop the table and clear all
             # embedded_* fields so callers know to re-embed.
             store.upsert_embeddings(
-                [(rowid, "hash-1", [1.0, 0.0, 0.0])], model="m", dimensions=3
+                [(chunk.rowid, chunk.chunk_hash, [1.0, 0.0, 0.0])], model="m", dimensions=3
             )
             self.assertEqual(len(store.search_vectors([1.0, 0.0, 0.0], 5, "m", 3)), 1)
 

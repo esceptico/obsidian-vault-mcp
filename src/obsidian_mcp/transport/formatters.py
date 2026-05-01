@@ -105,15 +105,23 @@ def format_search(
         path = str(hit.get("path") or "")
         score = hit.get("score")
         source = hit.get("source")
+        heading = str(hit.get("heading") or "")
+        chunk_index = hit.get("chunk_index")
+        start_char = hit.get("start_char")
+        end_char = hit.get("end_char")
         score_text = f", score: {score}" if score is not None else ""
         source_text = f", source: {source}" if source else ""
+        chunk_text = f", chunk: {chunk_index}" if chunk_index is not None else ""
+        range_text = f", chars: {start_char}-{end_char}" if start_char is not None and end_char is not None else ""
         lines.extend(
             [
                 "",
                 f"## {index}. {title}",
-                f"Path: {_code_span(path)}{score_text}{source_text}",
+                f"Path: {_code_span(path)}{score_text}{source_text}{chunk_text}{range_text}",
             ]
         )
+        if heading:
+            lines.append(f"Heading: {_code_span(heading)}")
         snippet = _blockquote(str(hit.get("snippet") or "").strip())
         if snippet:
             lines.extend(["", snippet])

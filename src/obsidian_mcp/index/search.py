@@ -7,7 +7,6 @@ from openai import OpenAI
 
 from obsidian_mcp.core.config import EmbeddingSettings
 from obsidian_mcp.core.constants import (
-    EMBEDDING_MAX_INPUT_CHARS,
     EMBEDDING_TIMEOUT_SECONDS,
     MAX_SEARCH_LIMIT,
     OPENAI_MAX_RETRIES,
@@ -17,7 +16,8 @@ from obsidian_mcp.core.constants import (
 )
 from obsidian_mcp.core.types import HitSource, SearchMode
 from obsidian_mcp.core.logging import get_logger
-from obsidian_mcp.index.store import FtsHit, RecordMeta, SearchStore, StoredNote, VectorHit
+from obsidian_mcp.index.chunking import TextChunk, chunk_markdown
+from obsidian_mcp.index.store import FtsHit, PendingChunk, SearchStore, StoredChunk, StoredNote, VectorHit
 from obsidian_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatter
 
 
@@ -44,10 +44,10 @@ class SearchIndex:
         caller is expected to flush via embed_pending() after batching many
         upserts (so we make one OpenAI call instead of one per file)."""
         record = _stored_note(note)
-        rowid = self.store.upsert_note(record)
+        self.store.upsert_note(record)
         if embed and self.embeddings.enabled:
             try:
-                self._embed_and_store([(rowid, record)])
+                self._embed_and_store(self._pending_embedding_chunks())
             except Exception as exc:
                 log.warning(
                     "embedding failed for %s (%s: %s); note remains FTS-indexed",
@@ -68,16 +68,11 @@ class SearchIndex:
         Used by startup sync to backfill after a batch of upserts."""
         if not self.embeddings.enabled:
             return 0
-        pending = self._pending_embedding_meta()
+        pending = self._pending_embedding_chunks()
         if not pending:
             return 0
-        # We need search_text + content_hash; pull them by re-reading via FTS.
-        # Caller-driven embedding (during sync) avoids this round-trip; this
-        # method is the safety net.
-        records_by_rowid = self._materialize_records(pending)
-        items = [(rowid, records_by_rowid[rowid]) for rowid, _ in pending if rowid in records_by_rowid]
         try:
-            return self._embed_and_store(items)
+            return self._embed_and_store(pending)
         except Exception as exc:
             log.warning("embedding backfill failed (%s: %s); notes remain FTS-indexed", type(exc).__name__, exc)
             return 0
@@ -126,43 +121,24 @@ class SearchIndex:
 
     # --- embedding helpers --------------------------------------------------
 
-    def _meta_needs_embedding(self, meta: RecordMeta) -> bool:
-        if meta.embedded_hash != meta.content_hash:
-            return True
-        if meta.embedded_model != self.embeddings.model:
-            return True
-        if self.embeddings.dimensions is not None and meta.embedded_dimensions != self.embeddings.dimensions:
-            return True
-        return False
+    def _pending_embedding_chunks(self) -> list[PendingChunk]:
+        return self.store.pending_embedding_chunks(self.embeddings.model, self.embeddings.dimensions)
 
-    def _pending_embedding_meta(self) -> list[tuple[int, RecordMeta]]:
-        return [
-            (meta.rowid, meta)
-            for meta in self.store.all_records().values()
-            if self._meta_needs_embedding(meta)
-        ]
-
-    def _embed_and_store(self, items: list[tuple[int, StoredNote]]) -> int:
-        """items: list of (rowid, StoredNote). Embeds in batches and writes
-        into vec_notes + note_meta. Returns the number of records embedded."""
+    def _embed_and_store(self, items: list[PendingChunk]) -> int:
+        """Embed chunks and write into vec_chunks + chunk_meta."""
         total = 0
         for batch_start in range(0, len(items), self.embeddings.batch_size):
             batch = items[batch_start : batch_start + self.embeddings.batch_size]
-            inputs = [_truncate_for_embedding(record.search_text) for _, record in batch]
+            inputs = [chunk.search_text for chunk in batch]
             vectors = self._embed_texts(inputs)
             dim = len(vectors[0]) if vectors else 0
             self.store.upsert_embeddings(
-                ((rowid, record.content_hash, vector) for (rowid, record), vector in zip(batch, vectors, strict=True)),
+                ((chunk.rowid, chunk.chunk_hash, vector) for chunk, vector in zip(batch, vectors, strict=True)),
                 self.embeddings.model,
                 dim,
             )
             total += len(batch)
         return total
-
-    def _materialize_records(self, pending: list[tuple[int, RecordMeta]]) -> dict[int, StoredNote]:
-        """For records flagged as needing embedding by the meta table alone,
-        rehydrate the StoredNote from the FTS row so we have search_text."""
-        return self.store.records_by_rowid([rowid for rowid, _ in pending])
 
     def _client(self) -> OpenAI:
         if self._openai_client is None:
@@ -194,10 +170,21 @@ class SearchIndex:
 
 def _stored_note(note: IndexedNote) -> StoredNote:
     frontmatter, body = split_frontmatter(note.content)
+    body_start = len(note.content) - len(body)
     title = str(frontmatter.get("title") or Path(note.path).stem)
     frontmatter_json = json.dumps(frontmatter, ensure_ascii=False, sort_keys=True)
     tags_text = " ".join(frontmatter_tags(frontmatter))
     search_text = f"{title}\n{frontmatter_json}\n{tags_text}\n{body}"
+    chunks = tuple(
+        _stored_chunk(
+            path=note.path,
+            title=title,
+            frontmatter_json=frontmatter_json,
+            tags_text=tags_text,
+            chunk=chunk,
+        )
+        for chunk in chunk_markdown(body, body_start=body_start)
+    )
     return StoredNote(
         path=note.path,
         title=title,
@@ -205,12 +192,47 @@ def _stored_note(note: IndexedNote) -> StoredNote:
         body=body,
         tags_text=tags_text,
         search_text=search_text,
-        content_hash=hashlib.sha256(search_text.encode("utf-8")).hexdigest(),
+        content_hash=hashlib.sha256(note.content.encode("utf-8")).hexdigest(),
+        chunks=chunks,
     )
 
 
-def _truncate_for_embedding(text: str) -> str:
-    return text[:EMBEDDING_MAX_INPUT_CHARS]
+def _stored_chunk(
+    *,
+    path: str,
+    title: str,
+    frontmatter_json: str,
+    tags_text: str,
+    chunk: TextChunk,
+) -> StoredChunk:
+    search_text = _chunk_search_text(path, title, frontmatter_json, tags_text, chunk.heading_path, chunk.text)
+    return StoredChunk(
+        path=path,
+        title=title,
+        frontmatter_json=frontmatter_json,
+        tags_text=tags_text,
+        chunk_index=chunk.chunk_index,
+        chunk_hash=hashlib.sha256(search_text.encode("utf-8")).hexdigest(),
+        heading_path=chunk.heading_path,
+        text=chunk.text,
+        search_text=search_text,
+        start_char=chunk.start_char,
+        end_char=chunk.end_char,
+    )
+
+
+def _chunk_search_text(path: str, title: str, frontmatter_json: str, tags_text: str, heading_path: str, text: str) -> str:
+    metadata = [
+        f"Path: {path}",
+        f"Title: {title}",
+    ]
+    if heading_path:
+        metadata.append(f"Heading: {heading_path}")
+    if tags_text:
+        metadata.append(f"Tags: {tags_text}")
+    if frontmatter_json != "{}":
+        metadata.append(f"Frontmatter: {frontmatter_json}")
+    return "\n".join(metadata + ["", text])
 
 
 def _make_fts_query(query: str) -> str:
@@ -224,10 +246,15 @@ def _candidate_limit(limit: int) -> int:
 
 def _fts_hit_to_dict(hit: FtsHit) -> dict:
     return {
+        "chunk_id": hit.chunk_id,
         "path": hit.path,
         "score": round(hit.score, SCORE_DECIMALS),
         "title": hit.title,
+        "heading": hit.heading_path,
         "snippet": hit.snippet,
+        "chunk_index": hit.chunk_index,
+        "start_char": hit.start_char,
+        "end_char": hit.end_char,
         "source": HitSource.FTS.value,
     }
 
@@ -236,26 +263,31 @@ def _vector_hit_to_dict(hit: VectorHit) -> dict:
     # cosine distance ∈ [0, 2]; flip to a similarity score ∈ [-1, 1] so
     # higher is better and the result shape matches FTS hits semantically.
     return {
+        "chunk_id": hit.chunk_id,
         "path": hit.path,
         "score": round(1.0 - hit.distance, SCORE_DECIMALS),
         "title": hit.title,
+        "heading": hit.heading_path,
         "snippet": hit.snippet,
+        "chunk_index": hit.chunk_index,
+        "start_char": hit.start_char,
+        "end_char": hit.end_char,
         "source": HitSource.VECTOR.value,
     }
 
 
 def _fuse_hits(fts_hits: list[dict], vector_hits: list[dict], limit: int) -> list[dict]:
-    by_path: dict[str, dict] = {}
-    scores: dict[str, float] = {}
+    by_chunk_id: dict[int, dict] = {}
+    scores: dict[int, float] = {}
     for hits in (fts_hits, vector_hits):
         for rank, hit in enumerate(hits, start=1):
-            path = hit["path"]
-            scores[path] = scores.get(path, 0.0) + 1 / (RRF_K + rank)
-            by_path.setdefault(path, hit.copy())
+            chunk_id = hit["chunk_id"]
+            scores[chunk_id] = scores.get(chunk_id, 0.0) + 1 / (RRF_K + rank)
+            by_chunk_id.setdefault(chunk_id, hit.copy())
 
     fused = []
-    for path, score in scores.items():
-        hit = by_path[path]
+    for chunk_id, score in scores.items():
+        hit = by_chunk_id[chunk_id]
         hit["score"] = round(score, SCORE_DECIMALS)
         hit["source"] = HitSource.HYBRID.value
         fused.append(hit)
