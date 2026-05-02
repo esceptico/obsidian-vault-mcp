@@ -30,7 +30,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.embeddings.model, "text-embedding-3-large")
         self.assertEqual(settings.embeddings.dimensions, 256)
 
-    def test_plain_openai_environment_is_supported(self) -> None:
+    def test_plain_openai_environment_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env = {
                 "OBSIDIAN_MCP_VAULT_ROOT": tmp,
@@ -40,8 +40,8 @@ class ConfigTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=True):
                 settings = ServerSettings(_env_file=None)  # type: ignore[call-arg]
 
-        self.assertEqual(settings.embeddings.api_key, "plain-openai-key")
-        self.assertEqual(settings.embeddings.base_url, "https://openrouter.ai/api/v1")
+        self.assertIsNone(settings.embeddings.api_key)
+        self.assertIsNone(settings.embeddings.base_url)
 
     def test_embedding_batch_size_must_be_positive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

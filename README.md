@@ -25,7 +25,7 @@ uv sync
 ```bash
 export OBSIDIAN_MCP_VAULT_ROOT="$HOME/path/to/vault"
 export OBSIDIAN_MCP_AUTH_TOKEN="change-me"
-export OPENAI_API_KEY="sk-..."
+export OBSIDIAN_MCP_OPENAI_API_KEY="sk-..."
 uv run obsidian-mcp run --host 127.0.0.1 --port 8000
 ```
 
@@ -169,7 +169,7 @@ This generates a systemd unit reading from `/etc/cloudflared/config.yml`.
 
 ## Notes
 
-`vault_search(mode="hybrid")` combines SQLite FTS5 and OpenAI embeddings when `OPENAI_API_KEY` or `OBSIDIAN_MCP_OPENAI_API_KEY` is set. Without an API key, hybrid search falls back to FTS5 and returns a warning.
+`vault_search(mode="hybrid")` combines SQLite FTS5 and OpenAI embeddings when `OBSIDIAN_MCP_OPENAI_API_KEY` is set. Without an API key, hybrid search falls back to FTS5 and returns a warning.
 
 The search index is stored inside the vault at `.obsidian-mcp/index.sqlite`.
 
@@ -177,6 +177,7 @@ Embedding settings:
 
 ```bash
 export OBSIDIAN_MCP_EMBEDDING_MODEL="text-embedding-3-small"
+export OBSIDIAN_MCP_OPENAI_BASE_URL="https://openrouter.ai/api/v1" # optional
 export OBSIDIAN_MCP_EMBEDDING_DIMENSIONS="1536" # optional
 export OBSIDIAN_MCP_EMBEDDING_BATCH_SIZE="64"
 ```

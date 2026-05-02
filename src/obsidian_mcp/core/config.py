@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import AliasChoices, Field, SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -42,14 +42,8 @@ class ServerSettings(BaseSettings):
     port: int = Field(default=8000, ge=0, le=65535)
     auth_token: str | None = Field(default=None)
 
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OBSIDIAN_MCP_OPENAI_API_KEY", "OPENAI_API_KEY"),
-    )
-    openai_base_url: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OBSIDIAN_MCP_OPENAI_BASE_URL", "OPENAI_BASE_URL"),
-    )
+    openai_api_key: SecretStr | None = Field(default=None)
+    openai_base_url: str | None = Field(default=None)
     embedding_model: str = Field(default="text-embedding-3-small")
     embedding_dimensions: int | None = Field(default=None, gt=0)
     embedding_batch_size: int = Field(default=64, ge=1)

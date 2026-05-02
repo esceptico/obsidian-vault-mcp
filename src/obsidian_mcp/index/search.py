@@ -22,7 +22,7 @@ from obsidian_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatte
 
 
 log = get_logger("search")
-VECTOR_DISABLED_WARNING = "Vector search is disabled; set OPENAI_API_KEY to enable embeddings."
+VECTOR_DISABLED_WARNING = "Vector search is disabled; set OBSIDIAN_MCP_OPENAI_API_KEY to enable embeddings."
 
 
 @dataclass(frozen=True)
