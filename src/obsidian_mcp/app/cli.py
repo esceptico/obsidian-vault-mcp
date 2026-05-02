@@ -24,34 +24,36 @@ def run(host: str | None, port: int | None) -> None:
 @click.option("--host", default=None)
 @click.option("--port", type=int, default=None)
 def start(host: str | None, port: int | None) -> None:
-    from obsidian_mcp.app.daemon import start_daemon
+    from obsidian_mcp.app.daemon import DaemonService
 
-    click.echo(f"started, pid={start_daemon(host, port)}")
+    pid = DaemonService.from_settings(host=host, port=port).start()
+    click.echo(f"started, pid={pid}")
 
 
 @cli.command()
 @click.option("--timeout", type=float, default=None)
 def stop(timeout: float | None) -> None:
-    from obsidian_mcp.app.daemon import stop_daemon
+    from obsidian_mcp.app.daemon import DaemonService
 
-    click.echo(stop_daemon(timeout) if timeout is not None else stop_daemon())
+    service = DaemonService.from_settings()
+    click.echo(service.stop(timeout) if timeout is not None else service.stop())
 
 
 @cli.command()
 @click.option("--host", default=None)
 @click.option("--port", type=int, default=None)
 def status(host: str | None, port: int | None) -> None:
-    from obsidian_mcp.app.daemon import daemon_status
+    from obsidian_mcp.app.daemon import DaemonService
 
-    click.echo(daemon_status(host, port))
+    click.echo(DaemonService.from_settings(host=host, port=port).status())
 
 
 @cli.command()
 @click.option("-f", "--follow", is_flag=True)
 def logs(follow: bool) -> None:
-    from obsidian_mcp.app.daemon import show_logs
+    from obsidian_mcp.app.daemon import DaemonService
 
-    show_logs(follow)
+    DaemonService.from_settings().logs(follow=follow)
 
 
 @cli.command()

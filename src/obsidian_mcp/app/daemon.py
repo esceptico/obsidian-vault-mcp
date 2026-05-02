@@ -15,56 +15,77 @@ from pathlib import Path
 
 from obsidian_mcp.core.config import ServerSettings, load_settings
 
-START_TIMEOUT = 10.0
-STOP_TIMEOUT = 10.0
-STARTUP_KILL_TIMEOUT = 2.0
-LOG_TAIL_LINES = 200
-FOLLOW_POLL_INTERVAL = 0.2
-HEALTH_PROBE_TIMEOUT = 1.0
-HEALTH_POLL_INTERVAL = 0.2
+_START_TIMEOUT = 10.0
+_STOP_TIMEOUT = 10.0
+_STARTUP_KILL_TIMEOUT = 2.0
+_LOG_TAIL_LINES = 200
+_FOLLOW_POLL_INTERVAL = 0.2
+_HEALTH_PROBE_TIMEOUT = 1.0
+_HEALTH_POLL_INTERVAL = 0.2
 
-INDEX_FILENAME = "index.sqlite"
-INDEX_SUBDIR = ".obsidian-mcp"
+_INDEX_FILENAME = "index.sqlite"
+_INDEX_SUBDIR = ".obsidian-mcp"
 
-STATE_DIR_ENV = "OBSIDIAN_MCP_STATE_DIR"
-DARWIN_SUBPATH = "Library/Application Support/obsidian-mcp"
-XDG_SUBPATH = "obsidian-mcp"
-LINUX_FALLBACK = ".local/state/obsidian-mcp"
+_STATE_DIR_ENV = "OBSIDIAN_MCP_STATE_DIR"
+_DARWIN_SUBPATH = "Library/Application Support/obsidian-mcp"
+_XDG_SUBPATH = "obsidian-mcp"
+_LINUX_FALLBACK = ".local/state/obsidian-mcp"
 
 
 class DaemonError(RuntimeError):
-    """Lifecycle-level failure such as an already-running server."""
+    pass
 
 
-class StopOutcome(StrEnum):
+class _StopOutcome(StrEnum):
     ABSENT = "absent"
     TERMINATED = "terminated"
     KILLED = "killed"
 
 
 @dataclass(frozen=True)
-class DaemonPaths:
+class _Endpoint:
+    bind_host: str
+    dial_host: str
+    port: int
+
+    @classmethod
+    def resolve(
+        cls,
+        settings: ServerSettings,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+    ) -> "_Endpoint":
+        bind_host = host or settings.host
+        bind_port = settings.port if port is None else port
+        return cls(bind_host=bind_host, dial_host=_dialable_host(bind_host), port=bind_port)
+
+
+@dataclass(frozen=True)
+class _DaemonPaths:
     state_dir: Path
     pid_file: Path
     log_file: Path
 
 
 @dataclass(frozen=True)
-class DaemonStatus:
+class _DaemonStatus:
     settings: ServerSettings
+    endpoint: _Endpoint
     running: bool
     note_count: int | None
     pid: int | None = None
     stale_pid: int | None = None
     healthy: bool | None = None
-    checked_port: int | None = None
 
     def format(self) -> str:
-        port = self.checked_port if self.checked_port is not None else self.settings.port
         if self.running and self.healthy is False:
-            head = f"◐ obsidian-mcp process running, health check failed (pid {self.pid}, port {port})"
+            head = (
+                "◐ obsidian-mcp process running, health check failed "
+                f"(pid {self.pid}, port {self.endpoint.port})"
+            )
         elif self.running:
-            head = f"● obsidian-mcp running (pid {self.pid}, port {port})"
+            head = f"● obsidian-mcp running (pid {self.pid}, port {self.endpoint.port})"
         elif self.stale_pid is not None:
             head = f"○ obsidian-mcp not running (stale pid {self.stale_pid})"
         else:
@@ -77,7 +98,7 @@ class DaemonStatus:
         return "\n".join(lines)
 
 
-class PidFile:
+class _PidFile:
     def __init__(self, path: Path) -> None:
         self.path = path
 
@@ -102,7 +123,7 @@ class PidFile:
         self.path.unlink(missing_ok=True)
 
 
-class ProcessTable:
+class _ProcessTable:
     def is_alive(self, pid: int) -> bool:
         try:
             os.kill(pid, 0)
@@ -112,58 +133,64 @@ class ProcessTable:
         except PermissionError:
             return True
 
-    def stop(self, pid: int, timeout: float, *, poll_interval: float = 0.1) -> StopOutcome:
+    def stop(self, pid: int, timeout: float, *, poll_interval: float = 0.1) -> _StopOutcome:
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
-            return StopOutcome.ABSENT
+            return _StopOutcome.ABSENT
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if not self.is_alive(pid):
-                return StopOutcome.TERMINATED
+                return _StopOutcome.TERMINATED
             time.sleep(poll_interval)
 
         if not self.is_alive(pid):
-            return StopOutcome.TERMINATED
+            return _StopOutcome.TERMINATED
 
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
-            return StopOutcome.TERMINATED
+            return _StopOutcome.TERMINATED
 
-        return StopOutcome.KILLED
+        return _StopOutcome.KILLED
 
 
-class HealthClient:
-    def wait(self, host: str, port: int, timeout: float) -> bool:
+class _HealthClient:
+    def wait(self, endpoint: _Endpoint, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return False
-            if self.probe(host, port, timeout=min(HEALTH_PROBE_TIMEOUT, remaining)):
+            if self.probe(endpoint, timeout=min(_HEALTH_PROBE_TIMEOUT, remaining)):
                 return True
-            sleep_for = min(HEALTH_POLL_INTERVAL, max(0.0, deadline - time.monotonic()))
+            sleep_for = min(_HEALTH_POLL_INTERVAL, max(0.0, deadline - time.monotonic()))
             time.sleep(sleep_for)
 
-    def probe(self, host: str, port: int, *, timeout: float) -> bool:
+    def probe(self, endpoint: _Endpoint, *, timeout: float) -> bool:
         try:
             with urllib.request.urlopen(
-                f"http://{host}:{port}/health", timeout=timeout
+                f"http://{endpoint.dial_host}:{endpoint.port}/health",
+                timeout=timeout,
             ) as response:
                 return response.status == 200
         except (OSError, urllib.error.URLError):
             return False
 
 
-class ServerLauncher:
-    def spawn(self, host: str | None, port: int | None, log_file: Path) -> subprocess.Popen[bytes]:
-        command = [sys.executable, "-m", "obsidian_mcp.app.cli", "run"]
-        if host is not None:
-            command.extend(["--host", host])
-        if port is not None:
-            command.extend(["--port", str(port)])
+class _ServerLauncher:
+    def spawn(self, endpoint: _Endpoint, log_file: Path) -> subprocess.Popen[bytes]:
+        command = [
+            sys.executable,
+            "-m",
+            "obsidian_mcp.app.cli",
+            "run",
+            "--host",
+            endpoint.bind_host,
+            "--port",
+            str(endpoint.port),
+        ]
 
         with log_file.open("ab") as log_handle:
             return subprocess.Popen(
@@ -175,10 +202,10 @@ class ServerLauncher:
             )
 
 
-class LogReader:
+class _LogReader:
     def show(self, log_file: Path, *, follow: bool) -> None:
         if follow:
-            self.follow(log_file)
+            self._follow(log_file)
             return
 
         if not log_file.exists():
@@ -186,10 +213,10 @@ class LogReader:
             return
 
         lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
-        for line in lines[-LOG_TAIL_LINES:]:
+        for line in lines[-_LOG_TAIL_LINES:]:
             print(line)
 
-    def follow(self, log_file: Path) -> None:
+    def _follow(self, log_file: Path) -> None:
         if not log_file.exists():
             log_file.parent.mkdir(parents=True, exist_ok=True)
             log_file.touch()
@@ -202,7 +229,7 @@ class LogReader:
                     if chunk:
                         print(chunk, end="", flush=True)
                     else:
-                        time.sleep(FOLLOW_POLL_INTERVAL)
+                        time.sleep(_FOLLOW_POLL_INTERVAL)
         except KeyboardInterrupt:
             return
 
@@ -211,36 +238,37 @@ class DaemonService:
     def __init__(
         self,
         settings: ServerSettings,
-        paths: DaemonPaths,
+        endpoint: _Endpoint,
+        paths: _DaemonPaths,
         *,
-        pid_file: PidFile | None = None,
-        process_table: ProcessTable | None = None,
-        health_client: HealthClient | None = None,
-        launcher: ServerLauncher | None = None,
-        log_reader: LogReader | None = None,
+        pid_file: _PidFile | None = None,
+        process_table: _ProcessTable | None = None,
+        health_client: _HealthClient | None = None,
+        launcher: _ServerLauncher | None = None,
+        log_reader: _LogReader | None = None,
     ) -> None:
         self.settings = settings
+        self.endpoint = endpoint
         self.paths = paths
-        self.pid_file = pid_file or PidFile(paths.pid_file)
-        self.process_table = process_table or ProcessTable()
-        self.health_client = health_client or HealthClient()
-        self.launcher = launcher or ServerLauncher()
-        self.log_reader = log_reader or LogReader()
+        self.pid_file = pid_file or _PidFile(paths.pid_file)
+        self.process_table = process_table or _ProcessTable()
+        self.health_client = health_client or _HealthClient()
+        self.launcher = launcher or _ServerLauncher()
+        self.log_reader = log_reader or _LogReader()
 
     @classmethod
-    def from_settings(cls) -> "DaemonService":
+    def from_settings(
+        cls,
+        *,
+        host: str | None = None,
+        port: int | None = None,
+    ) -> "DaemonService":
         settings = load_settings()
-        return cls(settings, daemon_paths(settings.vault.root))
+        endpoint = _Endpoint.resolve(settings, host=host, port=port)
+        return cls(settings, endpoint, _daemon_paths(settings.vault.root))
 
-    def start(
-        self,
-        host: str | None,
-        port: int | None,
-        timeout: float = START_TIMEOUT,
-    ) -> int:
-        bind_host = host or self.settings.host
-        bind_port = port if port is not None else self.settings.port
-        if bind_port == 0:
+    def start(self, timeout: float = _START_TIMEOUT) -> int:
+        if self.endpoint.port == 0:
             raise ValueError("start does not support --port 0 (health port cannot be discovered)")
 
         self.paths.state_dir.mkdir(parents=True, exist_ok=True)
@@ -249,11 +277,11 @@ class DaemonService:
             raise DaemonError(f"obsidian-mcp is already running with pid {existing}")
         self.pid_file.remove()
 
-        proc = self.launcher.spawn(host, port, self.paths.log_file)
+        proc = self.launcher.spawn(self.endpoint, self.paths.log_file)
         self.pid_file.write(proc.pid)
 
         try:
-            healthy = self.health_client.wait(_health_host(bind_host), bind_port, timeout)
+            healthy = self.health_client.wait(self.endpoint, timeout)
         except BaseException:
             self._abort_child(proc.pid)
             raise
@@ -266,7 +294,7 @@ class DaemonService:
 
         return proc.pid
 
-    def stop(self, timeout: float = STOP_TIMEOUT) -> str:
+    def stop(self, timeout: float = _STOP_TIMEOUT) -> str:
         pid = self.pid_file.read()
         if pid is None:
             return "stopped"
@@ -277,102 +305,55 @@ class DaemonService:
 
         outcome = self.process_table.stop(pid, timeout)
         self.pid_file.remove()
-        return "stopped (killed)" if outcome is StopOutcome.KILLED else "stopped"
+        return "stopped (killed)" if outcome is _StopOutcome.KILLED else "stopped"
 
-    def status(self, host: str | None = None, port: int | None = None) -> DaemonStatus:
+    def status(self) -> str:
+        return self._status().format()
+
+    def logs(self, *, follow: bool) -> None:
+        self.log_reader.show(self.paths.log_file, follow=follow)
+
+    def _status(self) -> _DaemonStatus:
         pid = self.pid_file.read()
         note_count = _count_notes(_index_path(self.settings.vault.root))
 
         if pid is None:
-            return DaemonStatus(self.settings, running=False, note_count=note_count)
-        if not self.process_table.is_alive(pid):
-            return DaemonStatus(
+            return _DaemonStatus(
                 self.settings,
+                self.endpoint,
+                running=False,
+                note_count=note_count,
+            )
+        if not self.process_table.is_alive(pid):
+            return _DaemonStatus(
+                self.settings,
+                self.endpoint,
                 running=False,
                 note_count=note_count,
                 stale_pid=pid,
             )
 
-        bind_host = host or self.settings.host
-        bind_port = port if port is not None else self.settings.port
-        healthy = self.health_client.probe(
-            _health_host(bind_host),
-            bind_port,
-            timeout=HEALTH_PROBE_TIMEOUT,
-        )
-        return DaemonStatus(
+        healthy = self.health_client.probe(self.endpoint, timeout=_HEALTH_PROBE_TIMEOUT)
+        return _DaemonStatus(
             self.settings,
+            self.endpoint,
             running=True,
             pid=pid,
             note_count=note_count,
             healthy=healthy,
-            checked_port=bind_port,
         )
-
-    def logs(self, *, follow: bool) -> None:
-        self.log_reader.show(self.paths.log_file, follow=follow)
 
     def _abort_child(self, pid: int) -> None:
         try:
-            self.process_table.stop(pid, STARTUP_KILL_TIMEOUT)
+            self.process_table.stop(pid, _STARTUP_KILL_TIMEOUT)
         finally:
             self.pid_file.remove()
 
 
-def start_daemon(
-    host: str | None,
-    port: int | None,
-    timeout: float = START_TIMEOUT,
-) -> int:
-    return DaemonService.from_settings().start(host, port, timeout)
-
-
-def stop_daemon(timeout: float = STOP_TIMEOUT) -> str:
-    return DaemonService.from_settings().stop(timeout)
-
-
-def daemon_status(host: str | None = None, port: int | None = None) -> str:
-    return DaemonService.from_settings().status(host, port).format()
-
-
-def show_logs(follow: bool) -> None:
-    DaemonService.from_settings().logs(follow=follow)
-
-
-def read_pid(path: Path) -> int | None:
-    return PidFile(path).read()
-
-
-def write_pid(path: Path, pid: int) -> None:
-    PidFile(path).write(pid)
-
-
-def is_process_alive(pid: int) -> bool:
-    return ProcessTable().is_alive(pid)
-
-
-def wait_for_health(host: str, port: int, timeout: float) -> bool:
-    return HealthClient().wait(host, port, timeout)
-
-
-def start(host: str | None, port: int | None, timeout: float = START_TIMEOUT) -> int:
-    return start_daemon(host, port, timeout)
-
-
-def stop(timeout: float = STOP_TIMEOUT) -> str:
-    return stop_daemon(timeout)
-
-
-def status(host: str | None = None, port: int | None = None) -> str:
-    return daemon_status(host, port)
-
-
-def daemon_paths(vault_root: Path | None = None) -> DaemonPaths:
-    if vault_root is None:
-        vault_root = load_settings().vault.root
+def _daemon_paths(vault_root: Path) -> _DaemonPaths:
     state_dir = _state_dir()
     vault_id = _vault_id(vault_root)
-    return DaemonPaths(
+    return _DaemonPaths(
         state_dir=state_dir,
         pid_file=state_dir / f"{vault_id}.pid",
         log_file=state_dir / f"{vault_id}.log",
@@ -380,13 +361,13 @@ def daemon_paths(vault_root: Path | None = None) -> DaemonPaths:
 
 
 def _state_dir() -> Path:
-    if custom := os.environ.get(STATE_DIR_ENV):
+    if custom := os.environ.get(_STATE_DIR_ENV):
         return Path(custom).expanduser()
     if sys.platform == "darwin":
-        return Path.home() / DARWIN_SUBPATH
+        return Path.home() / _DARWIN_SUBPATH
     if xdg := os.environ.get("XDG_STATE_HOME"):
-        return Path(xdg).expanduser() / XDG_SUBPATH
-    return Path.home() / LINUX_FALLBACK
+        return Path(xdg).expanduser() / _XDG_SUBPATH
+    return Path.home() / _LINUX_FALLBACK
 
 
 def _vault_id(vault_root: Path) -> str:
@@ -397,7 +378,7 @@ def _vault_id(vault_root: Path) -> str:
 
 
 def _index_path(vault_root: Path) -> Path:
-    return vault_root.expanduser() / INDEX_SUBDIR / INDEX_FILENAME
+    return vault_root.expanduser() / _INDEX_SUBDIR / _INDEX_FILENAME
 
 
 def _count_notes(db_path: Path) -> int | None:
@@ -411,7 +392,7 @@ def _count_notes(db_path: Path) -> int | None:
         return None
 
 
-def _health_host(bind_host: str) -> str:
+def _dialable_host(bind_host: str) -> str:
     if bind_host in {"0.0.0.0", "::", "[::]"}:
         return "127.0.0.1"
     return bind_host
