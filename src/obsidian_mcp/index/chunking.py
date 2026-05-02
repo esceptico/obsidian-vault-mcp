@@ -9,7 +9,8 @@ from obsidian_mcp.core.constants import (
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
-_BREAK_RE = re.compile(r"\n\s*\n|(?<=[.!?])\s+")
+_BREAK_RE = re.compile(r"\n\s*\n|\n(?=\s*(?:[-*+]\s|\d+[.)]\s|\[|#{1,6}\s))|(?<=[.!?;])\s+")
+_BLOCK_START_RE = re.compile(r"(?:[-*+]\s|\d+[.)]\s|\[|#{1,6}\s)")
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,7 @@ def chunk_markdown(body: str, *, body_start: int = 0) -> tuple[TextChunk, ...]:
                 )
             )
     if chunks:
-        return tuple(chunks)
+        return _drop_nonleaf_heading_chunks(chunks)
     stripped = body.strip()
     if not stripped:
         return (
@@ -122,7 +123,8 @@ def _split_section(text: str, start_char: int) -> list[tuple[str, int, int]]:
         chunks.append((text[cursor:end], start_char + cursor, start_char + end))
         if end >= len(text):
             break
-        cursor = max(cursor + 1, end - EMBEDDING_CHUNK_OVERLAP_CHARS)
+        overlap_start = max(cursor + 1, end - EMBEDDING_CHUNK_OVERLAP_CHARS)
+        cursor = _find_next_chunk_start(text, overlap_start, end)
     return chunks
 
 
@@ -133,3 +135,45 @@ def _find_chunk_end(text: str, start: int) -> int:
     for match in _BREAK_RE.finditer(text, soft_start, hard_end):
         best = match.end()
     return best or hard_end
+
+
+def _find_next_chunk_start(text: str, start: int, previous_end: int) -> int:
+    position = start
+    while position < previous_end:
+        if text[position] != "\n":
+            position += 1
+            continue
+        candidate = position + 1
+        while candidate < len(text) and text[candidate] in " \t":
+            candidate += 1
+        if candidate < previous_end and _BLOCK_START_RE.match(text[candidate:]):
+            return candidate
+        position += 1
+    return start
+
+
+def _drop_nonleaf_heading_chunks(chunks: list[TextChunk]) -> tuple[TextChunk, ...]:
+    kept = []
+    for index, chunk in enumerate(chunks):
+        next_chunk = chunks[index + 1] if index + 1 < len(chunks) else None
+        if next_chunk and _is_heading_only(chunk.text) and _is_child_heading(chunk.heading_path, next_chunk.heading_path):
+            continue
+        kept.append(chunk)
+    return tuple(
+        TextChunk(
+            chunk_index=index,
+            heading_path=chunk.heading_path,
+            text=chunk.text,
+            start_char=chunk.start_char,
+            end_char=chunk.end_char,
+        )
+        for index, chunk in enumerate(kept)
+    )
+
+
+def _is_heading_only(text: str) -> bool:
+    return _HEADING_RE.match(text.strip()) is not None
+
+
+def _is_child_heading(parent: str, child: str) -> bool:
+    return bool(parent) and child.startswith(f"{parent} > ")

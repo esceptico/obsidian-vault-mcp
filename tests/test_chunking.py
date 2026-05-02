@@ -20,6 +20,21 @@ class ChunkingTests(unittest.TestCase):
         self.assertIn("late-marker", chunks[-1].text)
         self.assertTrue(all(chunk.start_char < chunk.end_char for chunk in chunks))
 
+    def test_nonleaf_heading_only_chunks_are_not_indexed(self) -> None:
+        chunks = chunk_markdown("# Parent\n## Child\nuseful body")
+
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0].heading_path, "Parent > Child")
+        self.assertTrue(chunks[0].text.startswith("## Child"))
+
+    def test_split_list_chunks_start_on_list_items_when_possible(self) -> None:
+        body = "# Items\n" + "\n".join(f"- item {index} {'x' * 50}" for index in range(200))
+        chunks = chunk_markdown(body)
+
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks[1:]:
+            self.assertTrue(chunk.text.startswith("- item"), chunk.text[:80])
+
 
 if __name__ == "__main__":
     unittest.main()
