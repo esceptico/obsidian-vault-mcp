@@ -57,7 +57,7 @@ def logs(follow: bool) -> None:
 def search(query: str, limit: int) -> None:
     settings = load_settings()
     vault = Vault(settings.vault, settings.embeddings)
-    click.echo(vault.search(query, limit=limit, mode=SearchMode.BM25))
+    click.echo(vault.search(query, limit=limit, mode=SearchMode.BM25).to_dict())
 
 
 def main() -> None:

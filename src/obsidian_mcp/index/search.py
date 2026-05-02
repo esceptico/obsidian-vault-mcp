@@ -1,7 +1,9 @@
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from openai import OpenAI
 
@@ -22,13 +24,34 @@ from obsidian_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatte
 
 
 log = get_logger("search")
-VECTOR_DISABLED_WARNING = "Vector search is disabled; set OBSIDIAN_MCP_OPENAI_API_KEY to enable embeddings."
+_VECTOR_DISABLED_WARNING = "Vector search is disabled; set OBSIDIAN_MCP_OPENAI_API_KEY to enable embeddings."
+_HYBRID_FTS_ONLY_WARNING = "Hybrid search returned SQLite FTS5 results only."
+_EMBEDDING_NOTE_WARNING = "embedding failed for %s (%s: %s); note remains FTS-indexed"
+_EMBEDDING_BACKFILL_WARNING = "embedding backfill failed (%s: %s); notes remain FTS-indexed"
+
+SearchHit = dict[str, Any]
 
 
 @dataclass(frozen=True)
 class IndexedNote:
     path: str
     content: str
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    hits: Sequence[SearchHit] = ()
+    warnings: Sequence[str] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "hits", tuple(self.hits))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hits": list(self.hits),
+            "warnings": list(self.warnings),
+        }
 
 
 class SearchIndex:
@@ -49,12 +72,7 @@ class SearchIndex:
             try:
                 self._embed_and_store(self._pending_embedding_chunks())
             except Exception as exc:
-                log.warning(
-                    "embedding failed for %s (%s: %s); note remains FTS-indexed",
-                    note.path,
-                    type(exc).__name__,
-                    exc,
-                )
+                log.warning(_EMBEDDING_NOTE_WARNING, note.path, type(exc).__name__, exc)
 
     def delete_note(self, path: str) -> None:
         self.store.delete_note(path)
@@ -74,46 +92,46 @@ class SearchIndex:
         try:
             return self._embed_and_store(pending)
         except Exception as exc:
-            log.warning("embedding backfill failed (%s: %s); notes remain FTS-indexed", type(exc).__name__, exc)
+            log.warning(_EMBEDDING_BACKFILL_WARNING, type(exc).__name__, exc)
             return 0
 
     # --- search -------------------------------------------------------------
 
-    def search(self, query: str, limit: int, mode: SearchMode) -> dict:
+    def search(self, query: str, limit: int, mode: SearchMode) -> SearchResult:
         mode = SearchMode(mode)
         if limit < 1 or limit > MAX_SEARCH_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_SEARCH_LIMIT}")
         if not query.strip():
-            return {"hits": [], "warnings": []}
+            return SearchResult(hits=[])
         if mode == SearchMode.BM25:
             return self._bm25_only(query, limit)
         if mode == SearchMode.VECTOR:
             return self._vector_only(query, limit)
         return self._hybrid(query, limit)
 
-    def _bm25_only(self, query: str, limit: int) -> dict:
-        return {"hits": self._search_fts(query, limit), "warnings": []}
+    def _bm25_only(self, query: str, limit: int) -> SearchResult:
+        return SearchResult(hits=self._search_fts(query, limit))
 
-    def _vector_only(self, query: str, limit: int) -> dict:
+    def _vector_only(self, query: str, limit: int) -> SearchResult:
         if not self.embeddings.enabled:
-            return {"hits": [], "warnings": [VECTOR_DISABLED_WARNING]}
-        return {"hits": self._search_vectors(query, limit), "warnings": []}
+            return SearchResult(hits=[], warnings=(_VECTOR_DISABLED_WARNING,))
+        return SearchResult(hits=self._search_vectors(query, limit))
 
-    def _hybrid(self, query: str, limit: int) -> dict:
+    def _hybrid(self, query: str, limit: int) -> SearchResult:
         candidate_limit = _candidate_limit(limit)
         fts_hits = self._search_fts(query, candidate_limit)
         if not self.embeddings.enabled:
-            return {"hits": fts_hits[:limit], "warnings": [VECTOR_DISABLED_WARNING]}
+            return SearchResult(hits=fts_hits[:limit], warnings=(_VECTOR_DISABLED_WARNING,))
         vector_hits = self._search_vectors(query, candidate_limit)
         if not vector_hits:
-            return {"hits": fts_hits[:limit], "warnings": ["Hybrid search returned SQLite FTS5 results only."]}
-        return {"hits": _fuse_hits(fts_hits, vector_hits, limit), "warnings": []}
+            return SearchResult(hits=fts_hits[:limit], warnings=(_HYBRID_FTS_ONLY_WARNING,))
+        return SearchResult(hits=_fuse_hits(fts_hits, vector_hits, limit))
 
-    def _search_fts(self, query: str, limit: int) -> list[dict]:
+    def _search_fts(self, query: str, limit: int) -> list[SearchHit]:
         fts_query = _make_fts_query(query)
         return [_fts_hit_to_dict(hit) for hit in self.store.search_fts(fts_query, limit)]
 
-    def _search_vectors(self, query: str, limit: int) -> list[dict]:
+    def _search_vectors(self, query: str, limit: int) -> list[SearchHit]:
         query_vector = self._embed_texts([query])[0]
         dim = len(query_vector)
         hits = self.store.search_vectors(query_vector, limit, self.embeddings.model, dim)
@@ -222,16 +240,15 @@ def _stored_chunk(
 
 
 def _chunk_search_text(path: str, title: str, frontmatter_json: str, tags_text: str, heading_path: str, text: str) -> str:
-    metadata = [
-        f"Path: {path}",
-        f"Title: {title}",
-    ]
+    metadata = [f"Path: {path}", f"Title: {title}"]
+
     if heading_path:
         metadata.append(f"Heading: {heading_path}")
     if tags_text:
         metadata.append(f"Tags: {tags_text}")
     if frontmatter_json != "{}":
         metadata.append(f"Frontmatter: {frontmatter_json}")
+
     return "\n".join(metadata + ["", text])
 
 
@@ -244,7 +261,7 @@ def _candidate_limit(limit: int) -> int:
     return min(MAX_SEARCH_LIMIT, max(limit, limit * RRF_CANDIDATE_MULTIPLIER))
 
 
-def _fts_hit_to_dict(hit: FtsHit) -> dict:
+def _fts_hit_to_dict(hit: FtsHit) -> SearchHit:
     return {
         "chunk_id": hit.chunk_id,
         "path": hit.path,
@@ -259,7 +276,7 @@ def _fts_hit_to_dict(hit: FtsHit) -> dict:
     }
 
 
-def _vector_hit_to_dict(hit: VectorHit) -> dict:
+def _vector_hit_to_dict(hit: VectorHit) -> SearchHit:
     # cosine distance ∈ [0, 2]; flip to a similarity score ∈ [-1, 1] so
     # higher is better and the result shape matches FTS hits semantically.
     return {
@@ -276,8 +293,12 @@ def _vector_hit_to_dict(hit: VectorHit) -> dict:
     }
 
 
-def _fuse_hits(fts_hits: list[dict], vector_hits: list[dict], limit: int) -> list[dict]:
-    by_chunk_id: dict[int, dict] = {}
+def _fuse_hits(
+    fts_hits: list[SearchHit],
+    vector_hits: list[SearchHit],
+    limit: int,
+) -> list[SearchHit]:
+    by_chunk_id: dict[int, SearchHit] = {}
     scores: dict[int, float] = {}
     for hits in (fts_hits, vector_hits):
         for rank, hit in enumerate(hits, start=1):

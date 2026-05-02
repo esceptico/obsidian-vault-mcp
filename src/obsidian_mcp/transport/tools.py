@@ -99,8 +99,8 @@ def vault_search(
     search_mode = SearchMode(mode)
     requested = min(MAX_SEARCH_LIMIT, offset + limit + 1)
     result = vault.search(query, requested, search_mode)
-    page = page_items(result.get("hits") or [], limit, offset)
-    warnings = result.get("warnings") or []
+    page = page_items(result.hits, limit, offset)
+    warnings = list(result.warnings)
     structured = {
         "query": query,
         "limit": page.limit,

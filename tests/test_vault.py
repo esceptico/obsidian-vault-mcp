@@ -45,7 +45,7 @@ class VaultTests(unittest.TestCase):
         return vault.list(path, sort_by, sort_order)
 
     def _bm25(self, vault: Vault, query: str) -> dict:
-        return vault.search(query, limit=10, mode=SearchMode.BM25)
+        return vault.search(query, limit=10, mode=SearchMode.BM25).to_dict()
 
     def _move(self, vault: Vault, src: str, dst: str, *, rewrite_links: bool = True) -> dict:
         return vault.move_path(src, dst, rewrite_links=rewrite_links, overwrite=False)

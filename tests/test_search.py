@@ -35,10 +35,10 @@ class SearchTests(unittest.TestCase):
                 vector = index.search("semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR)
                 hybrid = index.search("semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.HYBRID)
 
-        self.assertEqual(vector["hits"][0]["path"], "AI.md")
-        self.assertEqual(vector["hits"][0]["source"], "vector")
-        self.assertEqual(hybrid["hits"][0]["path"], "AI.md")
-        self.assertEqual(hybrid["hits"][0]["source"], "hybrid")
+        self.assertEqual(vector.hits[0]["path"], "AI.md")
+        self.assertEqual(vector.hits[0]["source"], "vector")
+        self.assertEqual(hybrid.hits[0]["path"], "AI.md")
+        self.assertEqual(hybrid.hits[0]["source"], "hybrid")
 
     def test_long_notes_embed_multiple_chunks_without_truncation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -55,7 +55,7 @@ class SearchTests(unittest.TestCase):
             content = "# Long\n" + ("early filler sentence. " * 400) + "\n\n## Late\nlate semantic marker"
             with patch.object(index, "_embed_texts", side_effect=embed):
                 index.upsert_note(IndexedNote(path="Long.md", content=content))
-                hits = index.search("late semantic marker", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR)["hits"]
+                hits = index.search("late semantic marker", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR).hits
 
         note_embedding_inputs = [text for text in embedded_inputs if text.startswith("Path: Long.md")]
         self.assertGreater(len(note_embedding_inputs), 1)
@@ -92,8 +92,8 @@ class SearchTests(unittest.TestCase):
             index = SearchIndex(Path(tmp) / "i.sqlite", EmbeddingSettings())
             index.upsert_note(IndexedNote(path="A.md", content="alpha"))
             index.upsert_note(IndexedNote(path="B.md", content="beta"))
-            beta_hits = [hit["path"] for hit in index.search("beta", limit=DEFAULT_LIMIT, mode=SearchMode.BM25)["hits"]]
-            alpha_hits = [hit["path"] for hit in index.search("alpha", limit=DEFAULT_LIMIT, mode=SearchMode.BM25)["hits"]]
+            beta_hits = [hit["path"] for hit in index.search("beta", limit=DEFAULT_LIMIT, mode=SearchMode.BM25).hits]
+            alpha_hits = [hit["path"] for hit in index.search("alpha", limit=DEFAULT_LIMIT, mode=SearchMode.BM25).hits]
             self.assertIn("B.md", beta_hits)
             self.assertIn("A.md", alpha_hits)
 
@@ -129,7 +129,7 @@ class SearchTests(unittest.TestCase):
             )
             with patch.object(index, "_embed_texts", side_effect=[[[1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0]]]):
                 self.assertEqual(index.embed_pending(), 1)
-                hits = index.search("semantic", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR)["hits"]
+                hits = index.search("semantic", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR).hits
 
             self.assertEqual(hits[0]["path"], "A.md")
 

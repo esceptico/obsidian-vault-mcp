@@ -14,7 +14,7 @@ from obsidian_mcp.core.constants import (
 from obsidian_mcp.markdown.obsidian import wikilinks
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
-from obsidian_mcp.index.search import IndexedNote, SearchIndex
+from obsidian_mcp.index.search import IndexedNote, SearchIndex, SearchResult
 from obsidian_mcp.vault.links import link_names_for, plan_wikilink_rewrites
 from obsidian_mcp.vault.listing import entry_for, sort_entries
 from obsidian_mcp.vault.notes import read_note, render_new_note, render_updated_note
@@ -286,7 +286,7 @@ class Vault:
             target.unlink()
         return {"ok": True, "path": path, "deleted": True}
 
-    def search(self, query: str, limit: int, mode: SearchMode) -> dict[str, Any]:
+    def search(self, query: str, limit: int, mode: SearchMode) -> SearchResult:
         if limit < 1 or limit > MAX_SEARCH_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_SEARCH_LIMIT}")
         return self._index.search(query=query, limit=limit, mode=SearchMode(mode))
