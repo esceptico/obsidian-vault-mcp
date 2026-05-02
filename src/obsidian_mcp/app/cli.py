@@ -61,6 +61,7 @@ def search(query: str, limit: int) -> None:
 
 
 def main() -> None:
+    # entry point for the cli
     cli()
 
 
