@@ -11,8 +11,8 @@ class CliTests(unittest.TestCase):
     def test_run_port_zero_overrides_environment(self) -> None:
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch("obsidian_mcp.core.logging.configure_default_logging"),
-            patch("obsidian_mcp.transport.http.main") as serve_main,
+            patch("obsidian_mcp.app.cli.configure_default_logging"),
+            patch("obsidian_mcp.app.cli.serve_main") as serve_main,
         ):
             run_server(None, 0)
             self.assertEqual(os.environ["OBSIDIAN_MCP_PORT"], "0")
