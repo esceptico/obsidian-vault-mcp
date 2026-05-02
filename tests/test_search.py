@@ -124,13 +124,13 @@ class SearchTests(unittest.TestCase):
                 ).hits
             ]
             alpha_hits = [
-                hit["path"]
+                (hit["path"], hit["source"])
                 for hit in index.search(
                     "alpha", limit=DEFAULT_LIMIT, mode=SearchMode.BM25
                 ).hits
             ]
             self.assertIn("B.md", beta_hits)
-            self.assertIn("A.md", alpha_hits)
+            self.assertIn(("A.md", "bm25"), alpha_hits)
 
     def test_embed_pending_backfills_missing_embeddings(self) -> None:
         """A note indexed while embeddings were disabled (or before they were

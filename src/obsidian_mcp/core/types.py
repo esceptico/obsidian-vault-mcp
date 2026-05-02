@@ -27,9 +27,3 @@ class ListSortBy(StrEnum):
 class SortOrder(StrEnum):
     ASC = "asc"
     DESC = "desc"
-
-
-class HitSource(StrEnum):
-    FTS = "fts"
-    VECTOR = "vector"
-    HYBRID = "hybrid"

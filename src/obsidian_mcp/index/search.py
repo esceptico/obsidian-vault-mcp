@@ -16,8 +16,8 @@ from obsidian_mcp.core.constants import (
     RRF_K,
     SCORE_DECIMALS,
 )
-from obsidian_mcp.core.types import HitSource, SearchMode
 from obsidian_mcp.core.logging import get_logger
+from obsidian_mcp.core.types import SearchMode
 from obsidian_mcp.index.chunking import TextChunk, chunk_markdown
 from obsidian_mcp.index.store import (
     FtsHit,
@@ -308,7 +308,7 @@ def _fts_hit_to_dict(hit: FtsHit) -> SearchHit:
         "chunk_index": hit.chunk_index,
         "start_char": hit.start_char,
         "end_char": hit.end_char,
-        "source": HitSource.FTS.value,
+        "source": SearchMode.BM25.value,
     }
 
 
@@ -325,7 +325,7 @@ def _vector_hit_to_dict(hit: VectorHit) -> SearchHit:
         "chunk_index": hit.chunk_index,
         "start_char": hit.start_char,
         "end_char": hit.end_char,
-        "source": HitSource.VECTOR.value,
+        "source": SearchMode.VECTOR.value,
     }
 
 
@@ -346,7 +346,7 @@ def _fuse_hits(
     for chunk_id, score in scores.items():
         hit = by_chunk_id[chunk_id]
         hit["score"] = round(score, SCORE_DECIMALS)
-        hit["source"] = HitSource.HYBRID.value
+        hit["source"] = SearchMode.HYBRID.value
         fused.append(hit)
     fused.sort(key=lambda hit: hit["score"], reverse=True)
     return fused[:limit]
