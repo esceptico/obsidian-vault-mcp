@@ -1,7 +1,6 @@
 # obsidian-mcp
 
-Headless HTTP MCP server for an Obsidian-flavored Markdown vault. It reads and
-writes the vault directory directly; Obsidian Desktop does not need to be open.
+Headless HTTP MCP server for an Obsidian-flavored Markdown vault
 
 ## Install
 
@@ -57,12 +56,9 @@ uv run obsidian-mcp stop
 - `vault_backlinks`
 - `vault_reindex`
 
-Tool results return Markdown text for agents and `structuredContent` for
-programmatic clients.
+Tool results return Markdown text for agents and `structuredContent` for programmatic clients.
 
-The Markdown `content` is the compatibility path and should contain everything
-an agent needs. `structuredContent` is useful for clients that expose it, but
-some MCP clients still treat it as secondary metadata.
+The Markdown `content` is the compatibility path and should contain everything an agent needs. `structuredContent` is useful for clients that expose it, but some MCP clients still treat it as secondary metadata.
 
 ## Development
 
