@@ -41,6 +41,8 @@ MCP endpoint:
 http://127.0.0.1:8000/mcp
 ```
 
+For remote clients, see [Tunneling](docs/tunneling.md).
+
 Daemon commands:
 
 ```bash
