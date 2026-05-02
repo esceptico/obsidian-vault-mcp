@@ -9,7 +9,9 @@ from obsidian_mcp.core.constants import (
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _FENCE_RE = re.compile(r"^\s*(```|~~~)")
-_BREAK_RE = re.compile(r"\n\s*\n|\n(?=\s*(?:[-*+]\s|\d+[.)]\s|\[|#{1,6}\s))|(?<=[.!?;])\s+")
+_BREAK_RE = re.compile(
+    r"\n\s*\n|\n(?=\s*(?:[-*+]\s|\d+[.)]\s|\[|#{1,6}\s))|(?<=[.!?;])\s+"
+)
 _BLOCK_START_RE = re.compile(r"(?:[-*+]\s|\d+[.)]\s|\[|#{1,6}\s)")
 
 
@@ -97,7 +99,13 @@ def _sections(body: str, body_start: int) -> list[Section]:
         if match is None:
             continue
         if line_start > section_start:
-            sections.append(Section(section_heading, body[section_start:line_start], body_start + section_start))
+            sections.append(
+                Section(
+                    section_heading,
+                    body[section_start:line_start],
+                    body_start + section_start,
+                )
+            )
         level = len(match.group(1))
         title = match.group(2).strip()
         headings = headings[: level - 1]
@@ -106,7 +114,9 @@ def _sections(body: str, body_start: int) -> list[Section]:
         section_start = line_start
 
     if section_start < len(body):
-        sections.append(Section(section_heading, body[section_start:], body_start + section_start))
+        sections.append(
+            Section(section_heading, body[section_start:], body_start + section_start)
+        )
     return sections or [Section("", body, body_start)]
 
 
@@ -156,7 +166,11 @@ def _drop_nonleaf_heading_chunks(chunks: list[TextChunk]) -> tuple[TextChunk, ..
     kept = []
     for index, chunk in enumerate(chunks):
         next_chunk = chunks[index + 1] if index + 1 < len(chunks) else None
-        if next_chunk and _is_heading_only(chunk.text) and _is_child_heading(chunk.heading_path, next_chunk.heading_path):
+        if (
+            next_chunk
+            and _is_heading_only(chunk.text)
+            and _is_child_heading(chunk.heading_path, next_chunk.heading_path)
+        ):
             continue
         kept.append(chunk)
     return tuple(

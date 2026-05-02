@@ -31,12 +31,18 @@ log = get_logger("vault")
 
 
 class Vault:
-    def __init__(self, settings: VaultSettings, embeddings: EmbeddingSettings | None = None):
+    def __init__(
+        self, settings: VaultSettings, embeddings: EmbeddingSettings | None = None
+    ):
         self.settings = settings
         self.root = settings.root.resolve()
         if not self.root.exists() or not self.root.is_dir():
-            raise RuntimeError(f"Vault root does not exist or is not a directory: {self.root}")
-        self._index = SearchIndex(self.root / STORAGE_DIR / "index.sqlite", embeddings or EmbeddingSettings())
+            raise RuntimeError(
+                f"Vault root does not exist or is not a directory: {self.root}"
+            )
+        self._index = SearchIndex(
+            self.root / STORAGE_DIR / "index.sqlite", embeddings or EmbeddingSettings()
+        )
         self._lock = threading.RLock()
         self._watcher: VaultWatcher | None = None
         # Reconcile the index against disk at startup so the first search
@@ -150,8 +156,12 @@ class Vault:
             note_path = self.resolve(path)
             if not note_path.is_file():
                 raise ValueError(f"Not a file: {path}")
+            if self._is_ignored_path(note_path):
+                raise ValueError(f"Refusing to update hidden path: {path}")
             existing = note_path.read_text(encoding="utf-8")
-            next_content, previous_body = render_updated_note(existing, content, frontmatter_patch)
+            next_content, previous_body = render_updated_note(
+                existing, content, frontmatter_patch
+            )
             changed = next_content != existing
             if changed:
                 self._atomic_write(note_path, next_content)
@@ -165,11 +175,15 @@ class Vault:
                 "previous_body": previous_body,
             }
 
-    def move_path(self, source: str, destination: str, rewrite_links: bool, overwrite: bool) -> dict[str, Any]:
+    def move_path(
+        self, source: str, destination: str, rewrite_links: bool, overwrite: bool
+    ) -> dict[str, Any]:
         with self._lock:
             return self._move_path_locked(source, destination, rewrite_links, overwrite)
 
-    def _move_path_locked(self, source: str, destination: str, rewrite_links: bool, overwrite: bool) -> dict[str, Any]:
+    def _move_path_locked(
+        self, source: str, destination: str, rewrite_links: bool, overwrite: bool
+    ) -> dict[str, Any]:
         original_source = source
         src = self.resolve(source)
         clean_destination = clean_relative_path(destination)
@@ -213,21 +227,29 @@ class Vault:
             try:
                 shutil.move(str(dst), str(src))
             except Exception:
-                log.exception("rollback of move %s -> %s failed", original_source, destination)
+                log.exception(
+                    "rollback of move %s -> %s failed", original_source, destination
+                )
             raise
 
         if src.suffix == ".md":
             self._index.delete_note(old_rel)
         if dst.is_file() and dst.suffix == ".md":
             self._index.upsert_note(
-                IndexedNote(path=self.relative(dst), content=dst.read_text(encoding="utf-8"))
+                IndexedNote(
+                    path=self.relative(dst), content=dst.read_text(encoding="utf-8")
+                )
             )
         for path, content in applied_rewrites:
-            self._index.upsert_note(IndexedNote(path=self.relative(path), content=content))
+            self._index.upsert_note(
+                IndexedNote(path=self.relative(path), content=content)
+            )
 
         log.info(
             "move_path source=%s destination=%s rewritten=%d",
-            original_source, self.relative(dst), len(pending_rewrites),
+            original_source,
+            self.relative(dst),
+            len(pending_rewrites),
         )
         return {
             "ok": True,
@@ -236,11 +258,18 @@ class Vault:
             "rewritten_files": len(applied_rewrites),
         }
 
-    def delete_path(self, path: str, recursive: bool, strategy: DeleteStrategy) -> dict[str, Any]:
+    def delete_path(
+        self, path: str, recursive: bool, strategy: DeleteStrategy
+    ) -> dict[str, Any]:
         strategy = DeleteStrategy(strategy)
         with self._lock:
             target = self._validated_delete_target(path, recursive)
-            log.info("delete_path path=%s strategy=%s recursive=%s", path, strategy.value, recursive)
+            log.info(
+                "delete_path path=%s strategy=%s recursive=%s",
+                path,
+                strategy.value,
+                recursive,
+            )
             affected_md = self._affected_markdown_paths(target)
             result = _DELETE_DISPATCH[strategy](self, path, target)
             for md in affected_md:
@@ -317,6 +346,8 @@ class Vault:
         target = self.resolve(path)
         if not target.exists():
             raise FileNotFoundError(path)
+        if self._is_ignored_path(target):
+            raise ValueError(f"Refusing to inspect hidden path: {path}")
         names = self._link_names_for(target)
         hits = []
         for candidate, content in self._markdown_files().items():
@@ -392,7 +423,9 @@ class Vault:
         return self._is_ignored_relative_path(relative, is_directory=path.is_dir())
 
     def _is_ignored_relative_path(self, path: Path, *, is_directory: bool) -> bool:
-        return is_ignored_relative_path(path, trash_path=self.settings.trash_path, is_directory=is_directory)
+        return is_ignored_relative_path(
+            path, trash_path=self.settings.trash_path, is_directory=is_directory
+        )
 
     def _trash_dir(self) -> Path:
         clean = clean_relative_path(self.settings.trash_path)

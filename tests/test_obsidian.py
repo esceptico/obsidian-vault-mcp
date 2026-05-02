@@ -1,6 +1,10 @@
 import unittest
 
-from obsidian_mcp.markdown.obsidian import inline_tags, rewrite_wikilink_targets, wikilinks
+from obsidian_mcp.markdown.obsidian import (
+    inline_tags,
+    rewrite_wikilink_targets,
+    wikilinks,
+)
 
 
 class ObsidianMarkdownTests(unittest.TestCase):

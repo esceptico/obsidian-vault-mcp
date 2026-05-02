@@ -49,7 +49,9 @@ def format_list(
         f"Sorted by `{sort_by.value}` {sort_order.value}.",
     ]
     if page.has_more:
-        lines.append(f"More entries available. Use `offset={end}` with `limit={page.limit}`.")
+        lines.append(
+            f"More entries available. Use `offset={end}` with `limit={page.limit}`."
+        )
     lines.extend(
         [
             "",
@@ -88,14 +90,18 @@ def format_search(
 ) -> str:
     hits = page.items
     if not hits:
-        lines = [f"No matches found for {_code_span(query)} using `{mode.value}` search."]
+        lines = [
+            f"No matches found for {_code_span(query)} using `{mode.value}` search."
+        ]
     else:
         end = page.offset + page.returned
         lines = [
             f"Showing matches {page.offset + 1}-{end} for {_code_span(query)} using `{mode.value}` search."
         ]
         if page.has_more:
-            lines.append(f"More matches may be available. Use `offset={end}` with `limit={page.limit}`.")
+            lines.append(
+                f"More matches may be available. Use `offset={end}` with `limit={page.limit}`."
+            )
 
     for warning in warnings:
         lines.append(f"Warning: {warning}")
@@ -112,7 +118,11 @@ def format_search(
         score_text = f", score: {score}" if score is not None else ""
         source_text = f", source: {source}" if source else ""
         chunk_text = f", chunk: {chunk_index}" if chunk_index is not None else ""
-        range_text = f", chars: {start_char}-{end_char}" if start_char is not None and end_char is not None else ""
+        range_text = (
+            f", chars: {start_char}-{end_char}"
+            if start_char is not None and end_char is not None
+            else ""
+        )
         lines.extend(
             [
                 "",
@@ -192,7 +202,10 @@ def _read_metadata_lines(result: dict[str, Any]) -> list[str]:
     tags = result.get("tags") or []
     if tags:
         metadata.append("Tags: " + ", ".join(_code_span(str(tag)) for tag in tags))
-    for field, label in (("wikilinks", "Wikilinks"), ("markdown_links", "Markdown links")):
+    for field, label in (
+        ("wikilinks", "Wikilinks"),
+        ("markdown_links", "Markdown links"),
+    ):
         count = len(result.get(field) or [])
         if count:
             metadata.append(f"{label}: {count}")
@@ -246,7 +259,13 @@ def _relative_timestamp(value: datetime) -> str:
         return ""
     if seconds < 60:
         return "just now"
-    if seconds >= RELATIVE_TIMESTAMP_MAX_DAYS * HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE:
+    if (
+        seconds
+        >= RELATIVE_TIMESTAMP_MAX_DAYS
+        * HOURS_PER_DAY
+        * MINUTES_PER_HOUR
+        * SECONDS_PER_MINUTE
+    ):
         return ""
     for unit, unit_seconds in RELATIVE_TIME_UNITS:
         count = seconds // unit_seconds

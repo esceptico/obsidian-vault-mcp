@@ -69,7 +69,13 @@ class StoreTests(unittest.TestCase):
     def test_upsert_then_search_fts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SearchStore(Path(tmp) / "i.sqlite")
-            store.upsert_note(_note(body="semantic search notes", search_text="Alpha semantic", tags_text="ai"))
+            store.upsert_note(
+                _note(
+                    body="semantic search notes",
+                    search_text="Alpha semantic",
+                    tags_text="ai",
+                )
+            )
             hits = store.search_fts('"semantic"', 10)
         self.assertEqual(hits[0].path, "Alpha.md")
         self.assertEqual(hits[0].title, "Alpha")
@@ -85,8 +91,12 @@ class StoreTests(unittest.TestCase):
     def test_upsert_replaces_fts_row_on_change(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SearchStore(Path(tmp) / "i.sqlite")
-            store.upsert_note(_note(body="cucumber", search_text="X cucumber", content_hash="h1"))
-            store.upsert_note(_note(body="zucchini", search_text="X zucchini", content_hash="h2"))
+            store.upsert_note(
+                _note(body="cucumber", search_text="X cucumber", content_hash="h1")
+            )
+            store.upsert_note(
+                _note(body="zucchini", search_text="X zucchini", content_hash="h2")
+            )
             hits_old = store.search_fts('"cucumber"', 10)
             hits_new = store.search_fts('"zucchini"', 10)
         self.assertEqual(hits_old, [])
@@ -110,8 +120,24 @@ class StoreTests(unittest.TestCase):
     def test_vector_upsert_and_knn_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = SearchStore(Path(tmp) / "i.sqlite")
-            store.upsert_note(_note(path="AI.md", title="AI", search_text="AI", body="ai", content_hash="ai-h"))
-            store.upsert_note(_note(path="Food.md", title="Food", search_text="Food", body="food", content_hash="food-h"))
+            store.upsert_note(
+                _note(
+                    path="AI.md",
+                    title="AI",
+                    search_text="AI",
+                    body="ai",
+                    content_hash="ai-h",
+                )
+            )
+            store.upsert_note(
+                _note(
+                    path="Food.md",
+                    title="Food",
+                    search_text="Food",
+                    body="food",
+                    content_hash="food-h",
+                )
+            )
             pending = store.pending_embedding_chunks("m", None)
             by_path = {chunk.search_text: chunk for chunk in pending}
             store.upsert_embeddings(
@@ -132,11 +158,15 @@ class StoreTests(unittest.TestCase):
             store = SearchStore(Path(tmp) / "i.sqlite")
             store.upsert_note(_note(content_hash="h1"))
             chunk = store.pending_embedding_chunks("m", None)[0]
-            store.upsert_embeddings([(chunk.rowid, chunk.chunk_hash, [1.0, 0.0])], model="m", dimensions=2)
+            store.upsert_embeddings(
+                [(chunk.rowid, chunk.chunk_hash, [1.0, 0.0])], model="m", dimensions=2
+            )
             self.assertEqual(len(store.search_vectors([1.0, 0.0], 5, "m", 2)), 1)
 
             # Re-upsert with new content_hash; embedding should be evicted.
-            store.upsert_note(_note(body="changed", search_text="Alpha changed", content_hash="h2"))
+            store.upsert_note(
+                _note(body="changed", search_text="Alpha changed", content_hash="h2")
+            )
             self.assertEqual(store.search_vectors([1.0, 0.0], 5, "m", 2), [])
 
             meta = store.all_records()["Alpha.md"]
@@ -173,13 +203,17 @@ class StoreTests(unittest.TestCase):
             store = SearchStore(Path(tmp) / "i.sqlite")
             store.upsert_note(_note())
             chunk = store.pending_embedding_chunks("m", None)[0]
-            store.upsert_embeddings([(chunk.rowid, chunk.chunk_hash, [1.0, 0.0])], model="m", dimensions=2)
+            store.upsert_embeddings(
+                [(chunk.rowid, chunk.chunk_hash, [1.0, 0.0])], model="m", dimensions=2
+            )
             self.assertEqual(len(store.search_vectors([1.0, 0.0], 5, "m", 2)), 1)
 
             # Switching dim from 2 to 3 must drop the table and clear all
             # embedded_* fields so callers know to re-embed.
             store.upsert_embeddings(
-                [(chunk.rowid, chunk.chunk_hash, [1.0, 0.0, 0.0])], model="m", dimensions=3
+                [(chunk.rowid, chunk.chunk_hash, [1.0, 0.0, 0.0])],
+                model="m",
+                dimensions=3,
             )
             self.assertEqual(len(store.search_vectors([1.0, 0.0, 0.0], 5, "m", 3)), 1)
 

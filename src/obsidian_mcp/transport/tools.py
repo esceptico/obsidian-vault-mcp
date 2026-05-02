@@ -29,12 +29,24 @@ from obsidian_mcp.transport.formatters import (
 from obsidian_mcp.transport.pagination import page_items, validate_page
 from obsidian_mcp.vault.service import Vault
 
-READ_ONLY_TOOL = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-REINDEX_TOOL = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
-CREATE_NOTE_TOOL = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
-UPDATE_NOTE_TOOL = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
-MOVE_PATH_TOOL = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
-DELETE_PATH_TOOL = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
+READ_ONLY_TOOL = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+REINDEX_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+CREATE_NOTE_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
+UPDATE_NOTE_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False
+)
+MOVE_PATH_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
+DELETE_PATH_TOOL = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
 
 
 ToolFunction = Callable[..., CallToolResult]
@@ -66,8 +78,8 @@ def vault_list(
         "total": page.total,
         "has_more": page.has_more,
         "next_offset": page.next_offset,
-        "entries": page.items,
-        "result": page.items,
+        "entries": list(page.items),
+        "result": list(page.items),
     }
     return text_result(
         format_list(path, page, ListSortBy(sort_by), SortOrder(sort_order)),
@@ -75,7 +87,9 @@ def vault_list(
     )
 
 
-def vault_read(vault: Vault, path: str, limit: int = DEFAULT_READ_LIMIT, offset: int = 0) -> CallToolResult:
+def vault_read(
+    vault: Vault, path: str, limit: int = DEFAULT_READ_LIMIT, offset: int = 0
+) -> CallToolResult:
     """Read a Markdown file.
 
     Page large notes with limit and offset. Offset/limit are character-based.
@@ -107,7 +121,7 @@ def vault_search(
         "offset": page.offset,
         "returned": page.returned,
         "mode": search_mode.value,
-        "hits": page.items,
+        "hits": list(page.items),
         "warnings": warnings,
         "has_more": page.has_more,
         "next_offset": page.next_offset,
@@ -205,15 +219,17 @@ def _add_tool(
     )
 
 
-def _page_read_result(result: dict[str, Any], limit: int, offset: int) -> dict[str, Any]:
+def _page_read_result(
+    result: dict[str, Any], limit: int, offset: int
+) -> dict[str, Any]:
     content = str(result.get("content") or "")
     total = len(content)
     page_content = content[offset : offset + limit]
-    next_offset = offset + len(page_content) if offset + len(page_content) < total else None
+    next_offset = (
+        offset + len(page_content) if offset + len(page_content) < total else None
+    )
     paged = {
-        key: value
-        for key, value in result.items()
-        if key not in {"body", "content"}
+        key: value for key, value in result.items() if key not in {"body", "content"}
     }
     paged["content"] = page_content
     paged["page"] = {

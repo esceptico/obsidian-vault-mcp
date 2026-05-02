@@ -7,7 +7,7 @@ class PaginationTests(unittest.TestCase):
     def test_page_items_reports_next_offset(self) -> None:
         page = page_items(["a", "b", "c"], limit=2, offset=0)
 
-        self.assertEqual(page.items, ["a", "b"])
+        self.assertEqual(page.items, ("a", "b"))
         self.assertEqual(page.total, 3)
         self.assertTrue(page.has_more)
         self.assertEqual(page.next_offset, 2)

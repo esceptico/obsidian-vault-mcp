@@ -11,7 +11,9 @@ import sqlite_vec
 from obsidian_mcp.core.constants import FTS_SNIPPET_LENGTH
 
 # --- FTS5 snippet config ----------------------------------------------------
-_SNIPPET_TARGET_COLUMN = 5  # 0-indexed: path, title, heading_path, frontmatter, tags, text
+_SNIPPET_TARGET_COLUMN = (
+    5  # 0-indexed: path, title, heading_path, frontmatter, tags, text
+)
 _SNIPPET_OPEN = "["
 _SNIPPET_CLOSE = "]"
 _SNIPPET_ELLIPSIS = " ... "
@@ -242,6 +244,7 @@ class StoredChunk:
 @dataclass(frozen=True)
 class StoredNote:
     """Indexable form of a note. `content_hash` drives change detection."""
+
     path: str
     title: str
     frontmatter_json: str
@@ -288,6 +291,7 @@ class VectorHit:
 @dataclass(frozen=True)
 class RecordMeta:
     """Snapshot of what the index knows about a path. Used for sync diffs."""
+
     rowid: int
     path: str
     content_hash: str
@@ -348,7 +352,9 @@ class SearchStore:
         stored = conn.execute(_SELECT_VEC_DIM).fetchone()
         if stored is None:
             conn.execute(
-                _CREATE_VEC_TABLE_TEMPLATE.format(if_not_exists="IF NOT EXISTS", dimensions=dimensions)
+                _CREATE_VEC_TABLE_TEMPLATE.format(
+                    if_not_exists="IF NOT EXISTS", dimensions=dimensions
+                )
             )
             conn.execute(_UPSERT_VEC_DIM, (str(dimensions),))
             return
@@ -398,7 +404,9 @@ class SearchStore:
                 rowid=row["rowid"],
                 path=row["path"],
                 content_hash=row["content_hash"],
-                embedded_hash=row["content_hash"] if row["chunk_count"] and row["chunk_count"] == row["embedded_count"] else None,
+                embedded_hash=row["content_hash"]
+                if row["chunk_count"] and row["chunk_count"] == row["embedded_count"]
+                else None,
                 embedded_model=row["embedded_model"],
                 embedded_dimensions=row["embedded_dimensions"],
                 chunk_count=row["chunk_count"],
@@ -411,9 +419,13 @@ class SearchStore:
         with self.connect() as conn:
             return conn.execute(_COUNT_META).fetchone()[0]
 
-    def pending_embedding_chunks(self, model: str, dimensions: int | None) -> list[PendingChunk]:
+    def pending_embedding_chunks(
+        self, model: str, dimensions: int | None
+    ) -> list[PendingChunk]:
         with self.connect() as conn:
-            rows = conn.execute(_SELECT_PENDING_CHUNKS, (model, dimensions, dimensions)).fetchall()
+            rows = conn.execute(
+                _SELECT_PENDING_CHUNKS, (model, dimensions, dimensions)
+            ).fetchall()
         return [
             PendingChunk(
                 rowid=row["rowid"],
@@ -503,7 +515,9 @@ class SearchStore:
 
     # ----- helpers ----------------------------------------------------------
 
-    def _insert_chunks(self, conn: sqlite3.Connection, note_rowid: int, note: StoredNote) -> None:
+    def _insert_chunks(
+        self, conn: sqlite3.Connection, note_rowid: int, note: StoredNote
+    ) -> None:
         for chunk in note.chunks:
             cursor = conn.execute(
                 _INSERT_CHUNK_META,
@@ -533,7 +547,9 @@ class SearchStore:
                 ),
             )
 
-    def _delete_chunks_for_note(self, conn: sqlite3.Connection, note_rowid: int) -> None:
+    def _delete_chunks_for_note(
+        self, conn: sqlite3.Connection, note_rowid: int
+    ) -> None:
         rows = conn.execute(_SELECT_CHUNK_ROWIDS_BY_NOTE, (note_rowid,)).fetchall()
         for row in rows:
             chunk_rowid = row["rowid"]
@@ -568,7 +584,7 @@ class SearchStore:
 
 def _serialize(vector: list[float]) -> bytes:
     """sqlite-vec accepts float32 little-endian byte sequences."""
-    return struct.pack(f"{len(vector)}f", *vector)
+    return struct.pack(f"<{len(vector)}f", *vector)
 
 
 def _load_vec_extension(conn: sqlite3.Connection) -> None:
@@ -580,5 +596,7 @@ def _load_vec_extension(conn: sqlite3.Connection) -> None:
             "--enable-loadable-sqlite-extensions."
         )
     conn.enable_load_extension(True)
-    sqlite_vec.load(conn)
-    conn.enable_load_extension(False)
+    try:
+        sqlite_vec.load(conn)
+    finally:
+        conn.enable_load_extension(False)

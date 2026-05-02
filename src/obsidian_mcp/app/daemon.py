@@ -33,7 +33,7 @@ _LINUX_FALLBACK = ".local/state/obsidian-mcp"
 
 
 class DaemonError(RuntimeError):
-    pass
+    """Raised when the daemon lifecycle cannot complete safely."""
 
 
 class _StopOutcome(StrEnum):
@@ -58,7 +58,9 @@ class _Endpoint:
     ) -> "_Endpoint":
         bind_host = host or settings.host
         bind_port = settings.port if port is None else port
-        return cls(bind_host=bind_host, dial_host=_dialable_host(bind_host), port=bind_port)
+        return cls(
+            bind_host=bind_host, dial_host=_dialable_host(bind_host), port=bind_port
+        )
 
 
 @dataclass(frozen=True)
@@ -91,7 +93,10 @@ class _DaemonStatus:
         else:
             head = "○ obsidian-mcp not running"
 
-        lines = [head, f"  vault:  {_compress_home(self.settings.vault.root.expanduser())}"]
+        lines = [
+            head,
+            f"  vault:  {_compress_home(self.settings.vault.root.expanduser())}",
+        ]
         if self.note_count is not None:
             suffix = "" if self.running else " (last-known)"
             lines.append(f"  notes:  {self.note_count} indexed{suffix}")
@@ -133,7 +138,9 @@ class _ProcessTable:
         except PermissionError:
             return True
 
-    def stop(self, pid: int, timeout: float, *, poll_interval: float = 0.1) -> _StopOutcome:
+    def stop(
+        self, pid: int, timeout: float, *, poll_interval: float = 0.1
+    ) -> _StopOutcome:
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -165,7 +172,9 @@ class _HealthClient:
                 return False
             if self.probe(endpoint, timeout=min(_HEALTH_PROBE_TIMEOUT, remaining)):
                 return True
-            sleep_for = min(_HEALTH_POLL_INTERVAL, max(0.0, deadline - time.monotonic()))
+            sleep_for = min(
+                _HEALTH_POLL_INTERVAL, max(0.0, deadline - time.monotonic())
+            )
             time.sleep(sleep_for)
 
     def probe(self, endpoint: _Endpoint, *, timeout: float) -> bool:
@@ -269,7 +278,9 @@ class DaemonService:
 
     def start(self, timeout: float = _START_TIMEOUT) -> int:
         if self.endpoint.port == 0:
-            raise ValueError("start does not support --port 0 (health port cannot be discovered)")
+            raise ValueError(
+                "start does not support --port 0 (health port cannot be discovered)"
+            )
 
         self.paths.state_dir.mkdir(parents=True, exist_ok=True)
         existing = self.pid_file.read()

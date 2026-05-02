@@ -46,7 +46,9 @@ def split_frontmatter_raw(markdown: str) -> tuple[MutableMapping[str, Any], str]
     return _parse_yaml(raw_yaml), body
 
 
-def render_frontmatter(frontmatter: MutableMapping[str, Any] | dict[str, Any], body: str) -> str:
+def render_frontmatter(
+    frontmatter: MutableMapping[str, Any] | dict[str, Any], body: str
+) -> str:
     normalized_body = body.lstrip("\r\n")
     if not frontmatter:
         return normalized_body
@@ -61,7 +63,9 @@ def patch_frontmatter(markdown: str, patch: dict[str, Any]) -> str:
     return render_frontmatter(current, body)
 
 
-def _apply_frontmatter_updates(frontmatter: MutableMapping[str, Any], updates: dict[str, Any]) -> None:
+def _apply_frontmatter_updates(
+    frontmatter: MutableMapping[str, Any], updates: dict[str, Any]
+) -> None:
     for key, value in updates.items():
         if value is None:
             frontmatter.pop(key, None)

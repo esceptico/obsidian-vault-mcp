@@ -36,7 +36,9 @@ def wikilinks(markdown: str) -> list[WikiLink]:
     links: list[WikiLink] = []
     for text in _non_code_blocks(markdown):
         for match in WIKILINK_RE.finditer(text):
-            target, alias, heading, block_id = parse_wikilink_inner(match.group("inner"))
+            target, alias, heading, block_id = parse_wikilink_inner(
+                match.group("inner")
+            )
             links.append(
                 WikiLink(
                     raw=match.group(0),
@@ -51,15 +53,27 @@ def wikilinks(markdown: str) -> list[WikiLink]:
 
 
 def markdown_links(markdown: str) -> list[str]:
-    return [match.group("target") for text in _non_code_blocks(markdown) for match in MARKDOWN_LINK_RE.finditer(text)]
+    return [
+        match.group("target")
+        for text in _non_code_blocks(markdown)
+        for match in MARKDOWN_LINK_RE.finditer(text)
+    ]
 
 
 def inline_tags(markdown: str) -> list[str]:
-    return sorted({tag for text in _non_code_blocks(markdown) for tag in TAG_RE.findall(text)})
+    return sorted(
+        {tag for text in _non_code_blocks(markdown) for tag in TAG_RE.findall(text)}
+    )
 
 
 def block_ids(markdown: str) -> list[str]:
-    return sorted({block_id for text in _non_code_blocks(markdown) for block_id in BLOCK_ID_RE.findall(text)})
+    return sorted(
+        {
+            block_id
+            for text in _non_code_blocks(markdown)
+            for block_id in BLOCK_ID_RE.findall(text)
+        }
+    )
 
 
 def rewrite_wikilink_targets(

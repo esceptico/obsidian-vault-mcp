@@ -30,8 +30,12 @@ class CliTests(unittest.TestCase):
         runner = CliRunner()
         service = unittest.mock.Mock()
         service.start.return_value = 123
-        with patch("obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service) as factory:
-            result = runner.invoke(cli, ["start", "--host", "127.0.0.1", "--port", "9000"])
+        with patch(
+            "obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service
+        ) as factory:
+            result = runner.invoke(
+                cli, ["start", "--host", "127.0.0.1", "--port", "9000"]
+            )
 
         self.assertEqual(result.exit_code, 0)
         self.assertIn("started, pid=123", result.output)
@@ -42,7 +46,9 @@ class CliTests(unittest.TestCase):
         runner = CliRunner()
         service = unittest.mock.Mock()
         service.stop.return_value = "stopped"
-        with patch("obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service) as factory:
+        with patch(
+            "obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service
+        ) as factory:
             result = runner.invoke(cli, ["stop", "--timeout", "1.5"])
 
         self.assertEqual(result.exit_code, 0)
@@ -54,7 +60,9 @@ class CliTests(unittest.TestCase):
         runner = CliRunner()
         service = unittest.mock.Mock()
         service.status.return_value = "stopped"
-        with patch("obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service) as factory:
+        with patch(
+            "obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service
+        ) as factory:
             result = runner.invoke(cli, ["status"])
 
         self.assertEqual(result.exit_code, 0)

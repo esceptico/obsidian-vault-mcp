@@ -29,7 +29,9 @@ class VaultTests(unittest.TestCase):
 
     # ----- helpers so the tests stay readable without piling on defaults -----
 
-    def _create(self, vault: Vault, path: str, content: str = "", frontmatter=None) -> dict:
+    def _create(
+        self, vault: Vault, path: str, content: str = "", frontmatter=None
+    ) -> dict:
         return vault.create_note(path, content, frontmatter, overwrite=False)
 
     def _trash(self, vault: Vault, path: str) -> dict:
@@ -47,7 +49,9 @@ class VaultTests(unittest.TestCase):
     def _bm25(self, vault: Vault, query: str) -> dict:
         return vault.search(query, limit=10, mode=SearchMode.BM25).to_dict()
 
-    def _move(self, vault: Vault, src: str, dst: str, *, rewrite_links: bool = True) -> dict:
+    def _move(
+        self, vault: Vault, src: str, dst: str, *, rewrite_links: bool = True
+    ) -> dict:
         return vault.move_path(src, dst, rewrite_links=rewrite_links, overwrite=False)
 
     # --------------------------------- tests ---------------------------------
@@ -61,7 +65,12 @@ class VaultTests(unittest.TestCase):
     def test_create_read_search(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
-            self._create(vault, "Projects/Alpha", "This note discusses semantic search.", {"tags": ["ai"]})
+            self._create(
+                vault,
+                "Projects/Alpha",
+                "This note discusses semantic search.",
+                {"tags": ["ai"]},
+            )
 
             note = vault.read("Projects/Alpha.md")
             self.assertEqual(note["frontmatter"]["tags"], ["ai"])
@@ -73,8 +82,12 @@ class VaultTests(unittest.TestCase):
 
             results = self._bm25(vault, "semantic search")
             self.assertEqual(results["hits"][0]["path"], "Projects/Alpha.md")
-            self.assertTrue((Path(tmp.name) / ".obsidian-mcp" / "index.sqlite").exists())
-            self.assertNotIn(".obsidian-mcp", {entry["path"] for entry in self._list(vault)})
+            self.assertTrue(
+                (Path(tmp.name) / ".obsidian-mcp" / "index.sqlite").exists()
+            )
+            self.assertNotIn(
+                ".obsidian-mcp", {entry["path"] for entry in self._list(vault)}
+            )
 
             with self.assertRaises(ValueError):
                 self._create(vault, ".obsidian-mcp/manual", "nope")
@@ -86,7 +99,9 @@ class VaultTests(unittest.TestCase):
         tmp, vault = self.make_vault()
         with tmp:
             self._create(vault, "Old Note", "Body")
-            self._create(vault, "Ref", "See [[Old Note|alias]] and [[Old Note#Heading]].")
+            self._create(
+                vault, "Ref", "See [[Old Note|alias]] and [[Old Note#Heading]]."
+            )
 
             result = self._move(vault, "Old Note.md", "New Note.md")
             ref = vault.read("Ref.md")
@@ -105,16 +120,27 @@ class VaultTests(unittest.TestCase):
             visible.write_text("visible text", encoding="utf-8")
 
             listed = self._list(vault, "Projects")
-            self.assertEqual([entry["path"] for entry in listed], ["Projects/visible.md"])
+            self.assertEqual(
+                [entry["path"] for entry in listed], ["Projects/visible.md"]
+            )
             with self.assertRaises(ValueError):
                 self._list(vault, "Projects/.notes")
             with self.assertRaises(ValueError):
                 vault.read("Projects/.notes/note.md")
+            with self.assertRaises(ValueError):
+                vault.update_note(
+                    "Projects/.notes/note.md", content="edited", frontmatter_patch=None
+                )
+            with self.assertRaises(ValueError):
+                vault.backlinks("Projects/.notes/note.md")
 
             summary = vault.sync_from_disk()
             self.assertEqual(summary["added"], 1)
             self.assertEqual(self._bm25(vault, "hidden text")["hits"], [])
-            self.assertEqual(self._bm25(vault, "visible text")["hits"][0]["path"], "Projects/visible.md")
+            self.assertEqual(
+                self._bm25(vault, "visible text")["hits"][0]["path"],
+                "Projects/visible.md",
+            )
 
     def test_top_level_trash_is_hidden(self) -> None:
         tmp, vault = self.make_vault()
@@ -131,8 +157,18 @@ class VaultTests(unittest.TestCase):
             self._create(vault, "zeta", "z")
             self._create(vault, "aardvark", "a")
 
-            asc = [entry["path"] for entry in self._list(vault, sort_by=ListSortBy.NAME, sort_order=SortOrder.ASC)]
-            desc = [entry["path"] for entry in self._list(vault, sort_by=ListSortBy.NAME, sort_order=SortOrder.DESC)]
+            asc = [
+                entry["path"]
+                for entry in self._list(
+                    vault, sort_by=ListSortBy.NAME, sort_order=SortOrder.ASC
+                )
+            ]
+            desc = [
+                entry["path"]
+                for entry in self._list(
+                    vault, sort_by=ListSortBy.NAME, sort_order=SortOrder.DESC
+                )
+            ]
 
             self.assertEqual(asc, ["Alpha", "Beta", "aardvark.md", "zeta.md"])
             self.assertEqual(desc, ["Beta", "Alpha", "zeta.md", "aardvark.md"])
@@ -149,7 +185,9 @@ class VaultTests(unittest.TestCase):
 
             paths = [
                 entry["path"]
-                for entry in self._list(vault, sort_by=ListSortBy.MODIFIED_AT, sort_order=SortOrder.DESC)
+                for entry in self._list(
+                    vault, sort_by=ListSortBy.MODIFIED_AT, sort_order=SortOrder.DESC
+                )
                 if entry["path"] in {"Old.md", "New.md"}
             ]
 
@@ -159,7 +197,9 @@ class VaultTests(unittest.TestCase):
         tmp, vault = self.make_vault()
         with tmp:
             self._create(vault, "Note", "body")
-            entry = next(entry for entry in self._list(vault) if entry["path"] == "Note.md")
+            entry = next(
+                entry for entry in self._list(vault) if entry["path"] == "Note.md"
+            )
             self.assertIsInstance(entry["size"], int)
             self.assertIn("modified_at", entry)
             self.assertIn("created_at", entry)
@@ -169,7 +209,9 @@ class VaultTests(unittest.TestCase):
         with tmp:
             self._create(vault, "Note", "x")
             with self.assertRaises(ValueError):
-                vault.delete_path(".obsidian-mcp", recursive=True, strategy=DeleteStrategy.DELETE)
+                vault.delete_path(
+                    ".obsidian-mcp", recursive=True, strategy=DeleteStrategy.DELETE
+                )
 
     def test_trash_does_not_overwrite_same_second(self) -> None:
         from datetime import datetime, timezone
@@ -227,7 +269,9 @@ class VaultTests(unittest.TestCase):
         with tmp, patch("obsidian_mcp.vault.notes.MAX_NOTE_BYTES", 40):
             self._create(vault, "Note", "body")
             with self.assertRaises(ValueError):
-                vault.update_note("Note.md", content=None, frontmatter_patch={"long": "x" * 80})
+                vault.update_note(
+                    "Note.md", content=None, frontmatter_patch={"long": "x" * 80}
+                )
 
     def test_sync_from_disk_picks_up_out_of_band_changes(self) -> None:
         """Editing a note directly on disk (e.g. from Obsidian Desktop) goes
@@ -237,7 +281,9 @@ class VaultTests(unittest.TestCase):
         with tmp:
             self._create(vault, "Note", "original body")
             # Tamper directly on disk, bypassing the Vault API.
-            (Path(tmp.name) / "Note.md").write_text("tampered cucumber", encoding="utf-8")
+            (Path(tmp.name) / "Note.md").write_text(
+                "tampered cucumber", encoding="utf-8"
+            )
 
             # Search before sync: tampered content not yet indexed.
             before = self._bm25(vault, "cucumber")["hits"]
@@ -278,6 +324,7 @@ class VaultTests(unittest.TestCase):
             self.assertGreaterEqual(called.get("count", 0), 1)
 
             from obsidian_mcp.vault.paths import temporary_write_path
+
             a = temporary_write_path(Path(tmp.name) / "X.md")
             b = temporary_write_path(Path(tmp.name) / "X.md")
             self.assertNotEqual(a.name, b.name)
@@ -339,19 +386,26 @@ class VaultTests(unittest.TestCase):
 
             vault.move_path("Old.md", "New.md", rewrite_links=True, overwrite=True)
 
-            self.assertEqual((Path(tmp.name) / "New.md").read_text(encoding="utf-8"), "moved body")
+            self.assertEqual(
+                (Path(tmp.name) / "New.md").read_text(encoding="utf-8"), "moved body"
+            )
 
     def test_move_refuses_reserved_trash_path(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
             self._create(vault, "Note", "body")
             with self.assertRaises(ValueError):
-                vault.move_path("Note.md", ".trash/Note.md", rewrite_links=True, overwrite=False)
+                vault.move_path(
+                    "Note.md", ".trash/Note.md", rewrite_links=True, overwrite=False
+                )
 
     def test_custom_nested_trash_path_is_reserved(self) -> None:
         tmp = tempfile.TemporaryDirectory()
         with tmp:
-            vault = Vault(VaultSettings(root=Path(tmp.name), trash_path="System/Trash"), embeddings=None)
+            vault = Vault(
+                VaultSettings(root=Path(tmp.name), trash_path="System/Trash"),
+                embeddings=None,
+            )
             with self.assertRaises(ValueError):
                 self._create(vault, "System/Trash/Note", "body")
             visible = self._list(vault)
@@ -366,7 +420,9 @@ class VaultTests(unittest.TestCase):
                 VaultSettings(root=Path(tmp.name)),
                 EmbeddingSettings(api_key="k", model="text-embedding-3-small"),
             )
-            with patch.object(vault._index, "_embed_texts", side_effect=RuntimeError("openai down")):
+            with patch.object(
+                vault._index, "_embed_texts", side_effect=RuntimeError("openai down")
+            ):
                 result = self._create(vault, "Note", "lexical body")
 
             self.assertEqual(result["path"], "Note.md")

@@ -15,7 +15,9 @@ class SearchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             index = SearchIndex(
                 Path(tmp) / "index.sqlite",
-                EmbeddingSettings(api_key="test-key", model="text-embedding-3-small", batch_size=2),
+                EmbeddingSettings(
+                    api_key="test-key", model="text-embedding-3-small", batch_size=2
+                ),
             )
 
             def embed(texts: list[str]) -> list[list[float]]:
@@ -30,10 +32,16 @@ class SearchTests(unittest.TestCase):
                 return vectors
 
             with patch.object(index, "_embed_texts", side_effect=embed):
-                index.upsert_note(IndexedNote(path="AI.md", content="semantic vector search"))
+                index.upsert_note(
+                    IndexedNote(path="AI.md", content="semantic vector search")
+                )
                 index.upsert_note(IndexedNote(path="Food.md", content="recipe notes"))
-                vector = index.search("semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR)
-                hybrid = index.search("semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.HYBRID)
+                vector = index.search(
+                    "semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR
+                )
+                hybrid = index.search(
+                    "semantic question", limit=DEFAULT_LIMIT, mode=SearchMode.HYBRID
+                )
 
         self.assertEqual(vector.hits[0]["path"], "AI.md")
         self.assertEqual(vector.hits[0]["source"], "vector")
@@ -44,22 +52,37 @@ class SearchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             index = SearchIndex(
                 Path(tmp) / "index.sqlite",
-                EmbeddingSettings(api_key="test-key", model="text-embedding-3-small", batch_size=10),
+                EmbeddingSettings(
+                    api_key="test-key", model="text-embedding-3-small", batch_size=10
+                ),
             )
             embedded_inputs: list[str] = []
 
             def embed(texts: list[str]) -> list[list[float]]:
                 embedded_inputs.extend(texts)
-                return [[1.0, 0.0] if "late semantic marker" in text else [0.0, 1.0] for text in texts]
+                return [
+                    [1.0, 0.0] if "late semantic marker" in text else [0.0, 1.0]
+                    for text in texts
+                ]
 
-            content = "# Long\n" + ("early filler sentence. " * 400) + "\n\n## Late\nlate semantic marker"
+            content = (
+                "# Long\n"
+                + ("early filler sentence. " * 400)
+                + "\n\n## Late\nlate semantic marker"
+            )
             with patch.object(index, "_embed_texts", side_effect=embed):
                 index.upsert_note(IndexedNote(path="Long.md", content=content))
-                hits = index.search("late semantic marker", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR).hits
+                hits = index.search(
+                    "late semantic marker", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR
+                ).hits
 
-        note_embedding_inputs = [text for text in embedded_inputs if text.startswith("Path: Long.md")]
+        note_embedding_inputs = [
+            text for text in embedded_inputs if text.startswith("Path: Long.md")
+        ]
         self.assertGreater(len(note_embedding_inputs), 1)
-        self.assertTrue(any("late semantic marker" in text for text in note_embedding_inputs))
+        self.assertTrue(
+            any("late semantic marker" in text for text in note_embedding_inputs)
+        )
         self.assertEqual(hits[0]["path"], "Long.md")
         self.assertEqual(hits[0]["heading"], "Long > Late")
 
@@ -85,15 +108,27 @@ class SearchTests(unittest.TestCase):
                 self.assertIs(idx._client(), openai.return_value)
 
         openai.assert_called_once()
-        self.assertEqual(openai.call_args.kwargs["base_url"], "https://openrouter.ai/api/v1")
+        self.assertEqual(
+            openai.call_args.kwargs["base_url"], "https://openrouter.ai/api/v1"
+        )
 
     def test_upsert_does_not_full_rebuild(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             index = SearchIndex(Path(tmp) / "i.sqlite", EmbeddingSettings())
             index.upsert_note(IndexedNote(path="A.md", content="alpha"))
             index.upsert_note(IndexedNote(path="B.md", content="beta"))
-            beta_hits = [hit["path"] for hit in index.search("beta", limit=DEFAULT_LIMIT, mode=SearchMode.BM25).hits]
-            alpha_hits = [hit["path"] for hit in index.search("alpha", limit=DEFAULT_LIMIT, mode=SearchMode.BM25).hits]
+            beta_hits = [
+                hit["path"]
+                for hit in index.search(
+                    "beta", limit=DEFAULT_LIMIT, mode=SearchMode.BM25
+                ).hits
+            ]
+            alpha_hits = [
+                hit["path"]
+                for hit in index.search(
+                    "alpha", limit=DEFAULT_LIMIT, mode=SearchMode.BM25
+                ).hits
+            ]
             self.assertIn("B.md", beta_hits)
             self.assertIn("A.md", alpha_hits)
 
@@ -102,7 +137,9 @@ class SearchTests(unittest.TestCase):
         configured) should get embedded by a later embed_pending() call."""
         with tempfile.TemporaryDirectory() as tmp:
             no_key = EmbeddingSettings()
-            with_key = EmbeddingSettings(api_key="k", model="text-embedding-3-small", batch_size=4)
+            with_key = EmbeddingSettings(
+                api_key="k", model="text-embedding-3-small", batch_size=4
+            )
 
             index = SearchIndex(Path(tmp) / "i.sqlite", no_key)
             index.upsert_note(IndexedNote(path="A.md", content="hello"))
@@ -118,18 +155,28 @@ class SearchTests(unittest.TestCase):
             database = Path(tmp) / "i.sqlite"
             index = SearchIndex(
                 database,
-                EmbeddingSettings(api_key="k", model="text-embedding-3-small", dimensions=2),
+                EmbeddingSettings(
+                    api_key="k", model="text-embedding-3-small", dimensions=2
+                ),
             )
             with patch.object(index, "_embed_texts", return_value=[[1.0, 0.0]]):
                 index.upsert_note(IndexedNote(path="A.md", content="semantic note"))
 
             index = SearchIndex(
                 database,
-                EmbeddingSettings(api_key="k", model="text-embedding-3-small", dimensions=3),
+                EmbeddingSettings(
+                    api_key="k", model="text-embedding-3-small", dimensions=3
+                ),
             )
-            with patch.object(index, "_embed_texts", side_effect=[[[1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0]]]):
+            with patch.object(
+                index,
+                "_embed_texts",
+                side_effect=[[[1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0]]],
+            ):
                 self.assertEqual(index.embed_pending(), 1)
-                hits = index.search("semantic", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR).hits
+                hits = index.search(
+                    "semantic", limit=DEFAULT_LIMIT, mode=SearchMode.VECTOR
+                ).hits
 
             self.assertEqual(hits[0]["path"], "A.md")
 

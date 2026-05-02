@@ -61,7 +61,9 @@ class DaemonTests(unittest.TestCase):
 
             with (
                 patch("obsidian_mcp.app.daemon.subprocess.Popen", return_value=process),
-                patch("obsidian_mcp.app.daemon._HealthClient.wait", return_value=True) as wait,
+                patch(
+                    "obsidian_mcp.app.daemon._HealthClient.wait", return_value=True
+                ) as wait,
             ):
                 service.start()
 
@@ -96,7 +98,9 @@ class DaemonTests(unittest.TestCase):
             service = self._service(tmp, host="0.0.0.0", port=9000)
             service.pid_file.write(os.getpid())
 
-            with patch("obsidian_mcp.app.daemon._HealthClient.probe", return_value=True) as probe:
+            with patch(
+                "obsidian_mcp.app.daemon._HealthClient.probe", return_value=True
+            ) as probe:
                 output = service.status()
 
             endpoint = probe.call_args.args[0]

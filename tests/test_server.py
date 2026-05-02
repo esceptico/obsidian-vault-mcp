@@ -28,7 +28,9 @@ class BearerAuthMiddlewareTests(unittest.TestCase):
         self.client = TestClient(BearerAuthMiddleware(_make_inner_app(), self.TOKEN))
 
     def test_correct_token_passes_through(self) -> None:
-        response = self.client.post("/mcp", headers={"Authorization": f"Bearer {self.TOKEN}"})
+        response = self.client.post(
+            "/mcp", headers={"Authorization": f"Bearer {self.TOKEN}"}
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"ok": True})
 
@@ -96,7 +98,9 @@ class BuildAsgiAppTests(unittest.TestCase):
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn("access-control-allow-origin", {k.lower() for k in response.headers})
+        self.assertIn(
+            "access-control-allow-origin", {k.lower() for k in response.headers}
+        )
 
     def test_actual_request_still_requires_auth_after_cors(self) -> None:
         settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
@@ -105,7 +109,10 @@ class BuildAsgiAppTests(unittest.TestCase):
         # POST with Origin (browser-style) but no Authorization → still 401.
         response = client.post(
             "/mcp",
-            headers={"Origin": "http://localhost:6274", "Content-Type": "application/json"},
+            headers={
+                "Origin": "http://localhost:6274",
+                "Content-Type": "application/json",
+            },
             content=b"{}",
         )
         self.assertEqual(response.status_code, 401)
@@ -152,18 +159,34 @@ class ToolSchemaTests(unittest.TestCase):
 
     def test_nullable_fields_are_not_required_when_defaults_exist(self) -> None:
         tools = self._tools()
-        self.assertEqual(tools["vault_create_note"].inputSchema["required"], ["path", "content"])
+        self.assertEqual(
+            tools["vault_create_note"].inputSchema["required"], ["path", "content"]
+        )
         self.assertEqual(tools["vault_update_note"].inputSchema["required"], ["path"])
         self.assertEqual(tools["vault_list"].inputSchema.get("required", []), [])
-        self.assertEqual(tools["vault_list"].inputSchema["properties"]["path"]["default"], "")
-        self.assertEqual(tools["vault_list"].inputSchema["properties"]["limit"]["default"], 50)
-        self.assertEqual(tools["vault_list"].inputSchema["properties"]["offset"]["default"], 0)
+        self.assertEqual(
+            tools["vault_list"].inputSchema["properties"]["path"]["default"], ""
+        )
+        self.assertEqual(
+            tools["vault_list"].inputSchema["properties"]["limit"]["default"], 50
+        )
+        self.assertEqual(
+            tools["vault_list"].inputSchema["properties"]["offset"]["default"], 0
+        )
         self.assertEqual(tools["vault_read"].inputSchema["required"], ["path"])
-        self.assertEqual(tools["vault_read"].inputSchema["properties"]["limit"]["default"], 12000)
-        self.assertEqual(tools["vault_read"].inputSchema["properties"]["offset"]["default"], 0)
+        self.assertEqual(
+            tools["vault_read"].inputSchema["properties"]["limit"]["default"], 12000
+        )
+        self.assertEqual(
+            tools["vault_read"].inputSchema["properties"]["offset"]["default"], 0
+        )
         self.assertEqual(tools["vault_search"].inputSchema["required"], ["query"])
-        self.assertEqual(tools["vault_search"].inputSchema["properties"]["limit"]["default"], 10)
-        self.assertEqual(tools["vault_search"].inputSchema["properties"]["offset"]["default"], 0)
+        self.assertEqual(
+            tools["vault_search"].inputSchema["properties"]["limit"]["default"], 10
+        )
+        self.assertEqual(
+            tools["vault_search"].inputSchema["properties"]["offset"]["default"], 0
+        )
 
     def test_tool_output_schemas_do_not_force_stale_structured_shapes(self) -> None:
         tools = self._tools()
@@ -223,7 +246,9 @@ class ToolResultTests(unittest.TestCase):
             mcp = self._mcp(tmp)
 
             async def call_search():
-                return await mcp.call_tool("vault_search", {"query": "semantic", "mode": "bm25"})
+                return await mcp.call_tool(
+                    "vault_search", {"query": "semantic", "mode": "bm25"}
+                )
 
             result = asyncio.run(call_search())
 
@@ -276,8 +301,12 @@ class ToolResultTests(unittest.TestCase):
         self.assertFalse(result.structuredContent["has_more"])
         self.assertIsNone(result.structuredContent["next_offset"])
         self.assertEqual(result.structuredContent["entries"][0]["path"], "Beta.md")
-        self.assertEqual(result.structuredContent["result"], result.structuredContent["entries"])
-        self.assertRegex(result.content[0].text, r"(just now|\\d+ minute[s]? ago|\\d+ hour[s]? ago)")
+        self.assertEqual(
+            result.structuredContent["result"], result.structuredContent["entries"]
+        )
+        self.assertRegex(
+            result.content[0].text, r"(just now|\\d+ minute[s]? ago|\\d+ hour[s]? ago)"
+        )
         self.assertIn("UTC", result.content[0].text)
 
     def test_list_reports_next_offset_when_more_entries_exist(self) -> None:
@@ -291,13 +320,18 @@ class ToolResultTests(unittest.TestCase):
 
             result = asyncio.run(call_list())
 
-        self.assertIn("More entries available. Use `offset=1` with `limit=1`.", result.content[0].text)
+        self.assertIn(
+            "More entries available. Use `offset=1` with `limit=1`.",
+            result.content[0].text,
+        )
         self.assertTrue(result.structuredContent["has_more"])
         self.assertEqual(result.structuredContent["next_offset"], 1)
 
     def test_read_returns_note_markdown_and_structured_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "Alpha.md").write_text("---\ntags: [project]\n---\nBody", encoding="utf-8")
+            Path(tmp, "Alpha.md").write_text(
+                "---\ntags: [project]\n---\nBody", encoding="utf-8"
+            )
             mcp = self._mcp(tmp)
 
             async def call_read():
@@ -319,12 +353,17 @@ class ToolResultTests(unittest.TestCase):
             mcp = self._mcp(tmp)
 
             async def call_read():
-                return await mcp.call_tool("vault_read", {"path": "Alpha.md", "limit": 4, "offset": 5})
+                return await mcp.call_tool(
+                    "vault_read", {"path": "Alpha.md", "limit": 4, "offset": 5}
+                )
 
             result = asyncio.run(call_read())
 
         self.assertIn("Showing characters 6-9 of 16.", result.content[0].text)
-        self.assertIn("More content available. Use `offset=9` with `limit=4`.", result.content[0].text)
+        self.assertIn(
+            "More content available. Use `offset=9` with `limit=4`.",
+            result.content[0].text,
+        )
         self.assertIn("\n5678", result.content[0].text)
         self.assertNotIn("01234", result.content[0].text)
         self.assertEqual(result.structuredContent["content"], "5678")

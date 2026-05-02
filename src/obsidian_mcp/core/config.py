@@ -29,7 +29,9 @@ class EmbeddingSettings:
 
 
 class ServerSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_prefix="OBSIDIAN_MCP_")
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="ignore", env_prefix="OBSIDIAN_MCP_"
+    )
 
     vault_root: Path = Field()
     trash_path: str = Field(default=".trash")
@@ -62,7 +64,9 @@ class ServerSettings(BaseSettings):
     @property
     def embeddings(self) -> EmbeddingSettings:
         return EmbeddingSettings(
-            api_key=self.openai_api_key.get_secret_value() if self.openai_api_key else None,
+            api_key=self.openai_api_key.get_secret_value()
+            if self.openai_api_key
+            else None,
             base_url=self.openai_base_url,
             model=self.embedding_model,
             dimensions=self.embedding_dimensions,

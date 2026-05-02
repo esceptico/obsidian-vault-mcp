@@ -37,16 +37,24 @@ def sort_entries(
 
 
 def _sort_by_name(entries: list[dict[str, Any]], reverse: bool) -> list[dict[str, Any]]:
-    directories = [entry for entry in entries if entry["kind"] == EntryKind.DIRECTORY.value]
+    directories = [
+        entry for entry in entries if entry["kind"] == EntryKind.DIRECTORY.value
+    ]
     files = [entry for entry in entries if entry["kind"] == EntryKind.FILE.value]
-    return sorted(directories, key=_path_key, reverse=reverse) + sorted(files, key=_path_key, reverse=reverse)
+    return sorted(directories, key=_path_key, reverse=reverse) + sorted(
+        files, key=_path_key, reverse=reverse
+    )
 
 
-def _sort_by_metadata(entries: list[dict[str, Any]], sort_by: ListSortBy, reverse: bool) -> list[dict[str, Any]]:
+def _sort_by_metadata(
+    entries: list[dict[str, Any]], sort_by: ListSortBy, reverse: bool
+) -> list[dict[str, Any]]:
     key = sort_by.value
     with_value = [entry for entry in entries if entry[key] is not None]
     without_value = [entry for entry in entries if entry[key] is None]
-    return sorted(with_value, key=lambda entry: (entry[key], _path_key(entry)), reverse=reverse) + sorted(
+    return sorted(
+        with_value, key=lambda entry: (entry[key], _path_key(entry)), reverse=reverse
+    ) + sorted(
         without_value,
         key=_path_key,
     )

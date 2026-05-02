@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,12 @@ from obsidian_mcp.markdown.frontmatter import (
     split_frontmatter,
     split_frontmatter_raw,
 )
-from obsidian_mcp.markdown.obsidian import block_ids, inline_tags, markdown_links, wikilinks
+from obsidian_mcp.markdown.obsidian import (
+    block_ids,
+    inline_tags,
+    markdown_links,
+    wikilinks,
+)
 from obsidian_mcp.vault.listing import file_metadata
 
 
@@ -22,7 +28,7 @@ def read_note(root: Path, file_path: Path) -> dict[str, Any]:
         "body": body,
         "content": content,
         "file": file_metadata(file_path),
-        "wikilinks": [link.__dict__ for link in wikilinks(body)],
+        "wikilinks": [asdict(link) for link in wikilinks(body)],
         "markdown_links": markdown_links(body),
         "tags": sorted(set(frontmatter_tags(frontmatter) + inline_tags(body))),
         "block_ids": block_ids(body),

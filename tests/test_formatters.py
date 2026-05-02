@@ -29,7 +29,10 @@ class FormatterTests(unittest.TestCase):
         rendered = format_read(
             {
                 "path": "notes/`quoted`.md",
-                "file": {"modified_at": datetime.now(timezone.utc).isoformat(), "size": 1},
+                "file": {
+                    "modified_at": datetime.now(timezone.utc).isoformat(),
+                    "size": 1,
+                },
                 "tags": ["x`y"],
                 "wikilinks": [],
                 "markdown_links": [],
@@ -42,8 +45,12 @@ class FormatterTests(unittest.TestCase):
         self.assertIn("just now", rendered)
 
     def test_move_path_pluralizes_rewrite_count(self) -> None:
-        singular = format_move_path({"source": "a.md", "destination": "b.md", "rewritten_files": 1})
-        plural = format_move_path({"source": "a.md", "destination": "b.md", "rewritten_files": 2})
+        singular = format_move_path(
+            {"source": "a.md", "destination": "b.md", "rewritten_files": 1}
+        )
+        plural = format_move_path(
+            {"source": "a.md", "destination": "b.md", "rewritten_files": 2}
+        )
 
         self.assertIn("1 file", singular)
         self.assertIn("2 files", plural)

@@ -24,7 +24,9 @@ def configure_default_logging(level: int = logging.INFO) -> None:
         root.setLevel(level)
         return
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
     root.addHandler(handler)
     root.setLevel(level)
     root.propagate = False

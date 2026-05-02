@@ -108,7 +108,9 @@ async def _send_unauthorized(send: Send) -> None:
     await send({"type": "http.response.body", "body": _UNAUTHORIZED_BODY})
 
 
-def create_mcp(settings: ServerSettings | None = None, vault: Vault | None = None) -> FastMCP:
+def create_mcp(
+    settings: ServerSettings | None = None, vault: Vault | None = None
+) -> FastMCP:
     settings = settings or load_settings()
     _validate_auth_posture(settings)
     if vault is None:
@@ -171,7 +173,9 @@ def main() -> None:
     vault.start_watching()
     try:
         app = build_asgi_app(settings, mcp)
-        uvicorn.run(app, host=settings.host, port=settings.port, forwarded_allow_ips="*")
+        uvicorn.run(
+            app, host=settings.host, port=settings.port, forwarded_allow_ips="*"
+        )
     finally:
         vault.stop_watching()
 

@@ -19,15 +19,26 @@ from obsidian_mcp.core.constants import (
 from obsidian_mcp.core.types import HitSource, SearchMode
 from obsidian_mcp.core.logging import get_logger
 from obsidian_mcp.index.chunking import TextChunk, chunk_markdown
-from obsidian_mcp.index.store import FtsHit, PendingChunk, SearchStore, StoredChunk, StoredNote, VectorHit
+from obsidian_mcp.index.store import (
+    FtsHit,
+    PendingChunk,
+    SearchStore,
+    StoredChunk,
+    StoredNote,
+    VectorHit,
+)
 from obsidian_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatter
 
 
 log = get_logger("search")
-_VECTOR_DISABLED_WARNING = "Vector search is disabled; set OBSIDIAN_MCP_OPENAI_API_KEY to enable embeddings."
+_VECTOR_DISABLED_WARNING = (
+    "Vector search is disabled; set OBSIDIAN_MCP_OPENAI_API_KEY to enable embeddings."
+)
 _HYBRID_FTS_ONLY_WARNING = "Hybrid search returned SQLite FTS5 results only."
 _EMBEDDING_NOTE_WARNING = "embedding failed for %s (%s: %s); note remains FTS-indexed"
-_EMBEDDING_BACKFILL_WARNING = "embedding backfill failed (%s: %s); notes remain FTS-indexed"
+_EMBEDDING_BACKFILL_WARNING = (
+    "embedding backfill failed (%s: %s); notes remain FTS-indexed"
+)
 
 SearchHit = dict[str, Any]
 
@@ -121,26 +132,36 @@ class SearchIndex:
         candidate_limit = _candidate_limit(limit)
         fts_hits = self._search_fts(query, candidate_limit)
         if not self.embeddings.enabled:
-            return SearchResult(hits=fts_hits[:limit], warnings=(_VECTOR_DISABLED_WARNING,))
+            return SearchResult(
+                hits=fts_hits[:limit], warnings=(_VECTOR_DISABLED_WARNING,)
+            )
         vector_hits = self._search_vectors(query, candidate_limit)
         if not vector_hits:
-            return SearchResult(hits=fts_hits[:limit], warnings=(_HYBRID_FTS_ONLY_WARNING,))
+            return SearchResult(
+                hits=fts_hits[:limit], warnings=(_HYBRID_FTS_ONLY_WARNING,)
+            )
         return SearchResult(hits=_fuse_hits(fts_hits, vector_hits, limit))
 
     def _search_fts(self, query: str, limit: int) -> list[SearchHit]:
         fts_query = _make_fts_query(query)
-        return [_fts_hit_to_dict(hit) for hit in self.store.search_fts(fts_query, limit)]
+        return [
+            _fts_hit_to_dict(hit) for hit in self.store.search_fts(fts_query, limit)
+        ]
 
     def _search_vectors(self, query: str, limit: int) -> list[SearchHit]:
         query_vector = self._embed_texts([query])[0]
         dim = len(query_vector)
-        hits = self.store.search_vectors(query_vector, limit, self.embeddings.model, dim)
+        hits = self.store.search_vectors(
+            query_vector, limit, self.embeddings.model, dim
+        )
         return [_vector_hit_to_dict(hit) for hit in hits]
 
     # --- embedding helpers --------------------------------------------------
 
     def _pending_embedding_chunks(self) -> list[PendingChunk]:
-        return self.store.pending_embedding_chunks(self.embeddings.model, self.embeddings.dimensions)
+        return self.store.pending_embedding_chunks(
+            self.embeddings.model, self.embeddings.dimensions
+        )
 
     def _embed_and_store(self, items: list[PendingChunk]) -> int:
         """Embed chunks and write into vec_chunks + chunk_meta."""
@@ -151,7 +172,10 @@ class SearchIndex:
             vectors = self._embed_texts(inputs)
             dim = len(vectors[0]) if vectors else 0
             self.store.upsert_embeddings(
-                ((chunk.rowid, chunk.chunk_hash, vector) for chunk, vector in zip(batch, vectors, strict=True)),
+                (
+                    (chunk.rowid, chunk.chunk_hash, vector)
+                    for chunk, vector in zip(batch, vectors, strict=True)
+                ),
                 self.embeddings.model,
                 dim,
             )
@@ -173,7 +197,10 @@ class SearchIndex:
             return []
         request = self._embedding_request(texts)
         response = self._client().embeddings.create(**request)
-        return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+        return [
+            item.embedding
+            for item in sorted(response.data, key=lambda item: item.index)
+        ]
 
     def _embedding_request(self, texts: list[str]) -> dict:
         request: dict = {
@@ -223,7 +250,9 @@ def _stored_chunk(
     tags_text: str,
     chunk: TextChunk,
 ) -> StoredChunk:
-    search_text = _chunk_search_text(path, title, frontmatter_json, tags_text, chunk.heading_path, chunk.text)
+    search_text = _chunk_search_text(
+        path, title, frontmatter_json, tags_text, chunk.heading_path, chunk.text
+    )
     return StoredChunk(
         path=path,
         title=title,
@@ -239,7 +268,14 @@ def _stored_chunk(
     )
 
 
-def _chunk_search_text(path: str, title: str, frontmatter_json: str, tags_text: str, heading_path: str, text: str) -> str:
+def _chunk_search_text(
+    path: str,
+    title: str,
+    frontmatter_json: str,
+    tags_text: str,
+    heading_path: str,
+    text: str,
+) -> str:
     metadata = [f"Path: {path}", f"Title: {title}"]
 
     if heading_path:

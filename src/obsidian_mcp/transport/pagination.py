@@ -8,7 +8,7 @@ T = TypeVar("T")
 
 @dataclass(frozen=True)
 class Page(Generic[T]):
-    items: list[T]
+    items: tuple[T, ...]
     limit: int
     offset: int
     next_offset: int | None
@@ -32,6 +32,8 @@ def validate_page(limit: int, offset: int, max_limit: int) -> None:
 
 def page_items(items: Sequence[T], limit: int, offset: int) -> Page[T]:
     total = len(items)
-    page = list(items[offset : offset + limit])
+    page = tuple(items[offset : offset + limit])
     next_offset = offset + len(page) if offset + len(page) < total else None
-    return Page(items=page, limit=limit, offset=offset, next_offset=next_offset, total=total)
+    return Page(
+        items=page, limit=limit, offset=offset, next_offset=next_offset, total=total
+    )

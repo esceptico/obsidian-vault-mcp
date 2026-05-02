@@ -7,7 +7,9 @@ class ChunkingTests(unittest.TestCase):
     def test_markdown_headings_become_chunk_metadata(self) -> None:
         chunks = chunk_markdown("# Plan\nalpha\n\n## Details\nbeta", body_start=10)
 
-        self.assertEqual([chunk.heading_path for chunk in chunks], ["Plan", "Plan > Details"])
+        self.assertEqual(
+            [chunk.heading_path for chunk in chunks], ["Plan", "Plan > Details"]
+        )
         self.assertEqual(chunks[0].start_char, 10)
         self.assertIn("# Plan", chunks[0].text)
         self.assertIn("beta", chunks[1].text)
@@ -28,7 +30,9 @@ class ChunkingTests(unittest.TestCase):
         self.assertTrue(chunks[0].text.startswith("## Child"))
 
     def test_split_list_chunks_start_on_list_items_when_possible(self) -> None:
-        body = "# Items\n" + "\n".join(f"- item {index} {'x' * 50}" for index in range(200))
+        body = "# Items\n" + "\n".join(
+            f"- item {index} {'x' * 50}" for index in range(200)
+        )
         chunks = chunk_markdown(body)
 
         self.assertGreater(len(chunks), 1)
