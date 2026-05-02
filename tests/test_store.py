@@ -7,7 +7,7 @@ from pathlib import Path
 
 import hashlib
 
-from obsidian_vault_mcp.index.store import SearchStore, StoredChunk, StoredNote
+from headless_obsidian_mcp.index.store import SearchStore, StoredChunk, StoredNote
 
 
 def _note(**overrides) -> StoredNote:

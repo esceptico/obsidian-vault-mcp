@@ -307,7 +307,7 @@ wheels = [
 ]
 
 [[package]]
-name = "obsidian-vault-mcp"
+name = "headless-obsidian-mcp"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

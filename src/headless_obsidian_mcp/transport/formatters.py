@@ -3,8 +3,8 @@ from typing import Any
 
 from mcp.types import CallToolResult, TextContent
 
-from obsidian_vault_mcp.core.types import ListSortBy, SearchMode, SortOrder
-from obsidian_vault_mcp.transport.pagination import Page
+from headless_obsidian_mcp.core.types import ListSortBy, SearchMode, SortOrder
+from headless_obsidian_mcp.transport.pagination import Page
 
 BYTES_PER_KIB = 1024
 BYTES_PER_MIB = BYTES_PER_KIB * BYTES_PER_KIB

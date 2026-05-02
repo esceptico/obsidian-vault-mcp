@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from threading import Event
 
-from obsidian_vault_mcp.vault.watcher import VaultWatcher
+from headless_obsidian_mcp.vault.watcher import VaultWatcher
 
 # Watcher tests poll for FS events; give the OS a real (small) timeout
 # rather than guess timing. Total per test stays well under a second.
@@ -87,7 +87,7 @@ class WatcherIgnoreTests(unittest.TestCase):
     def test_is_ignored_predicate_blocks_events(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            ignored_dir = root / ".obsidian-vault-mcp"
+            ignored_dir = root / ".headless-obsidian-mcp"
             ignored_dir.mkdir()
 
             seen: list[str] = []
@@ -101,7 +101,7 @@ class WatcherIgnoreTests(unittest.TestCase):
                 root=root,
                 on_upsert=on_upsert,
                 on_delete=lambda _r: None,
-                is_ignored=lambda p: ".obsidian-vault-mcp" in p.parts,
+                is_ignored=lambda p: ".headless-obsidian-mcp" in p.parts,
                 debounce_seconds=_DEBOUNCE,
             )
             watcher.start()

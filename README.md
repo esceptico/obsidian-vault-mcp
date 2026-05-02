@@ -1,4 +1,4 @@
-# obsidian-vault-mcp
+# headless-obsidian-mcp
 
 Headless HTTP MCP server for an Obsidian-flavored Markdown vault
 
@@ -11,35 +11,28 @@ uv sync
 Run from PyPI without installing into the current project:
 
 ```bash
-uvx obsidian-vault-mcp run --host 127.0.0.1 --port 8000
-uvx --from obsidian-vault-mcp ovm run --host 127.0.0.1 --port 8000
+uvx headless-obsidian-mcp run --host 127.0.0.1 --port 8000
 ```
 
 ## Configure
 
 ```bash
-export OBSIDIAN_VAULT_MCP_VAULT_ROOT="$HOME/path/to/vault"
-export OBSIDIAN_VAULT_MCP_AUTH_TOKEN="change-me"
+export HEADLESS_OBSIDIAN_MCP_VAULT_ROOT="$HOME/path/to/vault"
+export HEADLESS_OBSIDIAN_MCP_AUTH_TOKEN="change-me"
 ```
 
 Optional OpenAI-compatible embeddings:
 
 ```bash
-export OBSIDIAN_VAULT_MCP_OPENAI_API_KEY="sk-..."
-export OBSIDIAN_VAULT_MCP_OPENAI_BASE_URL="https://openrouter.ai/api/v1"
-export OBSIDIAN_VAULT_MCP_EMBEDDING_MODEL="text-embedding-3-small"
+export HEADLESS_OBSIDIAN_MCP_OPENAI_API_KEY="sk-..."
+export HEADLESS_OBSIDIAN_MCP_OPENAI_BASE_URL="https://openrouter.ai/api/v1"
+export HEADLESS_OBSIDIAN_MCP_EMBEDDING_MODEL="text-embedding-3-small"
 ```
 
 ## Run
 
 ```bash
-uv run obsidian-vault-mcp run --host 127.0.0.1 --port 8000
-```
-
-Shortcut:
-
-```bash
-uv run ovm run --host 127.0.0.1 --port 8000
+uv run headless-obsidian-mcp run --host 127.0.0.1 --port 8000
 ```
 
 MCP endpoint:
@@ -51,10 +44,10 @@ http://127.0.0.1:8000/mcp
 Daemon commands:
 
 ```bash
-uv run obsidian-vault-mcp start
-uv run obsidian-vault-mcp status
-uv run obsidian-vault-mcp logs -f
-uv run obsidian-vault-mcp stop
+uv run headless-obsidian-mcp start
+uv run headless-obsidian-mcp status
+uv run headless-obsidian-mcp logs -f
+uv run headless-obsidian-mcp stop
 ```
 
 ## Tools

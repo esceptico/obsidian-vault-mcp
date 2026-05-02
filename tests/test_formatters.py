@@ -1,13 +1,13 @@
 import unittest
 from datetime import datetime, timezone
 
-from obsidian_vault_mcp.core.types import ListSortBy, SortOrder
-from obsidian_vault_mcp.transport.formatters import (
+from headless_obsidian_mcp.core.types import ListSortBy, SortOrder
+from headless_obsidian_mcp.transport.formatters import (
     format_list,
     format_move_path,
     format_read,
 )
-from obsidian_vault_mcp.transport.pagination import page_items
+from headless_obsidian_mcp.transport.pagination import page_items
 
 
 class FormatterTests(unittest.TestCase):

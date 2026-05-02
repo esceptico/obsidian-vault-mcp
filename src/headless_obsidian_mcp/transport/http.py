@@ -6,22 +6,22 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from obsidian_vault_mcp.core.config import ServerSettings, load_settings
-from obsidian_vault_mcp.core.constants import LOOPBACK_HOSTS
-from obsidian_vault_mcp.core.logging import get_logger
-from obsidian_vault_mcp.transport.tools import register_tools
-from obsidian_vault_mcp.vault.service import Vault
+from headless_obsidian_mcp.core.config import ServerSettings, load_settings
+from headless_obsidian_mcp.core.constants import LOOPBACK_HOSTS
+from headless_obsidian_mcp.core.logging import get_logger
+from headless_obsidian_mcp.transport.tools import register_tools
+from headless_obsidian_mcp.vault.service import Vault
 
 log = get_logger("server")
 
 _AUTH_DISABLED_NON_LOOPBACK = (
-    "AUTH DISABLED: refusing to bind a non-loopback host without OBSIDIAN_VAULT_MCP_AUTH_TOKEN. "
+    "AUTH DISABLED: refusing to bind a non-loopback host without HEADLESS_OBSIDIAN_MCP_AUTH_TOKEN. "
     "Set the token, or bind to 127.0.0.1."
 )
 _AUTH_DISABLED_LOOPBACK_WARNING = (
     "auth_token not set; tools are exposed without authentication on %s"
 )
-_REALM = "obsidian-vault-mcp"
+_REALM = "headless-obsidian-mcp"
 _UNAUTHORIZED_BODY = b'{"error":"unauthorized"}'
 
 # Headers a browser MCP client may send. Per the Streamable HTTP spec

@@ -1,6 +1,6 @@
 import unittest
 
-from obsidian_vault_mcp.index.chunking import chunk_markdown
+from headless_obsidian_mcp.index.chunking import chunk_markdown
 
 
 class ChunkingTests(unittest.TestCase):

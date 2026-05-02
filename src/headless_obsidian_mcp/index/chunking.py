@@ -2,7 +2,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-from obsidian_vault_mcp.core.constants import (
+from headless_obsidian_mcp.core.constants import (
     EMBEDDING_CHUNK_OVERLAP_CHARS,
     EMBEDDING_CHUNK_TARGET_CHARS,
 )

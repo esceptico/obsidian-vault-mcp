@@ -2,13 +2,13 @@ import os
 
 import click
 
-from obsidian_vault_mcp.app.daemon import DaemonService
-from obsidian_vault_mcp.core.config import load_settings
-from obsidian_vault_mcp.core.constants import DEFAULT_SEARCH_LIMIT
-from obsidian_vault_mcp.core.logging import configure_default_logging
-from obsidian_vault_mcp.core.types import SearchMode
-from obsidian_vault_mcp.transport.http import main as serve_main
-from obsidian_vault_mcp.vault.service import Vault
+from headless_obsidian_mcp.app.daemon import DaemonService
+from headless_obsidian_mcp.core.config import load_settings
+from headless_obsidian_mcp.core.constants import DEFAULT_SEARCH_LIMIT
+from headless_obsidian_mcp.core.logging import configure_default_logging
+from headless_obsidian_mcp.core.types import SearchMode
+from headless_obsidian_mcp.transport.http import main as serve_main
+from headless_obsidian_mcp.vault.service import Vault
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -66,9 +66,9 @@ def main() -> None:
 
 def run_server(host: str | None, port: int | None) -> None:
     if host:
-        os.environ["OBSIDIAN_VAULT_MCP_HOST"] = host
+        os.environ["HEADLESS_OBSIDIAN_MCP_HOST"] = host
     if port is not None:
-        os.environ["OBSIDIAN_VAULT_MCP_PORT"] = str(port)
+        os.environ["HEADLESS_OBSIDIAN_MCP_PORT"] = str(port)
 
     configure_default_logging()
     serve_main()

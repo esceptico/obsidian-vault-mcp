@@ -8,7 +8,7 @@ from typing import Iterable
 
 import sqlite_vec
 
-from obsidian_vault_mcp.core.constants import FTS_SNIPPET_LENGTH
+from headless_obsidian_mcp.core.constants import FTS_SNIPPET_LENGTH
 
 # --- FTS5 snippet config ----------------------------------------------------
 _SNIPPET_TARGET_COLUMN = (

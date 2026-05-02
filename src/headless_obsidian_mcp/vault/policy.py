@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from obsidian_vault_mcp.vault.paths import clean_relative_path, is_relative_to
+from headless_obsidian_mcp.vault.paths import clean_relative_path, is_relative_to
 
-STORAGE_DIR = ".obsidian-vault-mcp"
+STORAGE_DIR = ".headless-obsidian-mcp"
 
 
 def is_ignored_relative_path(

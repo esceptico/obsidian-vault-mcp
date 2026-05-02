@@ -3,9 +3,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from obsidian_vault_mcp.core.config import EmbeddingSettings
-from obsidian_vault_mcp.core.types import SearchMode
-from obsidian_vault_mcp.index.search import IndexedNote, SearchIndex
+from headless_obsidian_mcp.core.config import EmbeddingSettings
+from headless_obsidian_mcp.core.types import SearchMode
+from headless_obsidian_mcp.index.search import IndexedNote, SearchIndex
 
 DEFAULT_LIMIT = 10
 
@@ -104,7 +104,7 @@ class SearchTests(unittest.TestCase):
                     model="text-embedding-3-small",
                 ),
             )
-            with patch("obsidian_vault_mcp.index.search.OpenAI") as openai:
+            with patch("headless_obsidian_mcp.index.search.OpenAI") as openai:
                 self.assertIs(idx._client(), openai.return_value)
 
         openai.assert_called_once()

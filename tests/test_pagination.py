@@ -1,6 +1,6 @@
 import unittest
 
-from obsidian_vault_mcp.transport.pagination import page_items, validate_page
+from headless_obsidian_mcp.transport.pagination import page_items, validate_page
 
 
 class PaginationTests(unittest.TestCase):

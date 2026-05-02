@@ -1,6 +1,6 @@
 import unittest
 
-from obsidian_vault_mcp.markdown.obsidian import (
+from headless_obsidian_mcp.markdown.obsidian import (
     inline_tags,
     rewrite_wikilink_targets,
     wikilinks,

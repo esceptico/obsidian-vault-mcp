@@ -1,4 +1,4 @@
-from obsidian_vault_mcp.index.search import IndexedNote, SearchIndex
+from headless_obsidian_mcp.index.search import IndexedNote, SearchIndex
 
 
 def sync_index(index: SearchIndex, on_disk: dict[str, str]) -> dict[str, int]:

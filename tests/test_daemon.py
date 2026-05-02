@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from obsidian_vault_mcp.app.daemon import (
+from headless_obsidian_mcp.app.daemon import (
     DaemonService,
     _DaemonPaths,
     _Endpoint,
@@ -47,11 +47,11 @@ class DaemonTests(unittest.TestCase):
 
             with (
                 patch(
-                    "obsidian_vault_mcp.app.daemon.subprocess.Popen",
+                    "headless_obsidian_mcp.app.daemon.subprocess.Popen",
                     return_value=process,
                 ),
                 patch(
-                    "obsidian_vault_mcp.app.daemon._HealthClient.wait",
+                    "headless_obsidian_mcp.app.daemon._HealthClient.wait",
                     return_value=True,
                 ),
             ):
@@ -67,11 +67,11 @@ class DaemonTests(unittest.TestCase):
 
             with (
                 patch(
-                    "obsidian_vault_mcp.app.daemon.subprocess.Popen",
+                    "headless_obsidian_mcp.app.daemon.subprocess.Popen",
                     return_value=process,
                 ),
                 patch(
-                    "obsidian_vault_mcp.app.daemon._HealthClient.wait",
+                    "headless_obsidian_mcp.app.daemon._HealthClient.wait",
                     return_value=True,
                 ) as wait,
             ):
@@ -109,7 +109,8 @@ class DaemonTests(unittest.TestCase):
             service.pid_file.write(os.getpid())
 
             with patch(
-                "obsidian_vault_mcp.app.daemon._HealthClient.probe", return_value=True
+                "headless_obsidian_mcp.app.daemon._HealthClient.probe",
+                return_value=True,
             ) as probe:
                 output = service.status()
 
