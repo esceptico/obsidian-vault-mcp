@@ -2,21 +2,21 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from obsidian_mcp.core.constants import MAX_FRONTMATTER_DEPTH, MAX_NOTE_BYTES
-from obsidian_mcp.markdown.frontmatter import (
+from obsidian_vault_mcp.core.constants import MAX_FRONTMATTER_DEPTH, MAX_NOTE_BYTES
+from obsidian_vault_mcp.markdown.frontmatter import (
     frontmatter_tags,
     patch_frontmatter,
     render_frontmatter,
     split_frontmatter,
     split_frontmatter_raw,
 )
-from obsidian_mcp.markdown.obsidian import (
+from obsidian_vault_mcp.markdown.obsidian import (
     block_ids,
     inline_tags,
     markdown_links,
     wikilinks,
 )
-from obsidian_mcp.vault.listing import file_metadata
+from obsidian_vault_mcp.vault.listing import file_metadata
 
 
 def read_note(root: Path, file_path: Path) -> dict[str, Any]:

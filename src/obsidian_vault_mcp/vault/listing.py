@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from obsidian_mcp.core.types import EntryKind, ListSortBy, SortOrder
+from obsidian_vault_mcp.core.types import EntryKind, ListSortBy, SortOrder
 
 
 def entry_for(path: Path, relative_path: str) -> dict[str, Any]:

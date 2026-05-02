@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from obsidian_mcp.app.daemon import (
+from obsidian_vault_mcp.app.daemon import (
     DaemonService,
     _DaemonPaths,
     _Endpoint,
@@ -46,8 +46,14 @@ class DaemonTests(unittest.TestCase):
             process = Mock(pid=456)
 
             with (
-                patch("obsidian_mcp.app.daemon.subprocess.Popen", return_value=process),
-                patch("obsidian_mcp.app.daemon._HealthClient.wait", return_value=True),
+                patch(
+                    "obsidian_vault_mcp.app.daemon.subprocess.Popen",
+                    return_value=process,
+                ),
+                patch(
+                    "obsidian_vault_mcp.app.daemon._HealthClient.wait",
+                    return_value=True,
+                ),
             ):
                 pid = service.start()
 
@@ -60,9 +66,13 @@ class DaemonTests(unittest.TestCase):
             process = Mock(pid=456)
 
             with (
-                patch("obsidian_mcp.app.daemon.subprocess.Popen", return_value=process),
                 patch(
-                    "obsidian_mcp.app.daemon._HealthClient.wait", return_value=True
+                    "obsidian_vault_mcp.app.daemon.subprocess.Popen",
+                    return_value=process,
+                ),
+                patch(
+                    "obsidian_vault_mcp.app.daemon._HealthClient.wait",
+                    return_value=True,
                 ) as wait,
             ):
                 service.start()
@@ -99,7 +109,7 @@ class DaemonTests(unittest.TestCase):
             service.pid_file.write(os.getpid())
 
             with patch(
-                "obsidian_mcp.app.daemon._HealthClient.probe", return_value=True
+                "obsidian_vault_mcp.app.daemon._HealthClient.probe", return_value=True
             ) as probe:
                 output = service.status()
 

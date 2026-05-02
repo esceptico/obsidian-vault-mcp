@@ -30,7 +30,7 @@ class EmbeddingSettings:
 
 class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", extra="ignore", env_prefix="OBSIDIAN_MCP_"
+        env_file=".env", extra="ignore", env_prefix="OBSIDIAN_VAULT_MCP_"
     )
 
     vault_root: Path = Field()

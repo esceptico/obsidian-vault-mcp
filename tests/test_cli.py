@@ -4,23 +4,23 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from obsidian_mcp.app.cli import cli, run_server
+from obsidian_vault_mcp.app.cli import cli, run_server
 
 
 class CliTests(unittest.TestCase):
     def test_run_port_zero_overrides_environment(self) -> None:
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch("obsidian_mcp.app.cli.configure_default_logging"),
-            patch("obsidian_mcp.app.cli.serve_main") as serve_main,
+            patch("obsidian_vault_mcp.app.cli.configure_default_logging"),
+            patch("obsidian_vault_mcp.app.cli.serve_main") as serve_main,
         ):
             run_server(None, 0)
-            self.assertEqual(os.environ["OBSIDIAN_MCP_PORT"], "0")
+            self.assertEqual(os.environ["OBSIDIAN_VAULT_MCP_PORT"], "0")
             serve_main.assert_called_once_with()
 
     def test_run_delegates_to_server(self) -> None:
         runner = CliRunner()
-        with patch("obsidian_mcp.app.cli.run_server") as run:
+        with patch("obsidian_vault_mcp.app.cli.run_server") as run:
             result = runner.invoke(cli, ["run", "--port", "0"])
 
         self.assertEqual(result.exit_code, 0)
@@ -31,7 +31,8 @@ class CliTests(unittest.TestCase):
         service = unittest.mock.Mock()
         service.start.return_value = 123
         with patch(
-            "obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service
+            "obsidian_vault_mcp.app.daemon.DaemonService.from_settings",
+            return_value=service,
         ) as factory:
             result = runner.invoke(
                 cli, ["start", "--host", "127.0.0.1", "--port", "9000"]
@@ -47,7 +48,8 @@ class CliTests(unittest.TestCase):
         service = unittest.mock.Mock()
         service.stop.return_value = "stopped"
         with patch(
-            "obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service
+            "obsidian_vault_mcp.app.daemon.DaemonService.from_settings",
+            return_value=service,
         ) as factory:
             result = runner.invoke(cli, ["stop", "--timeout", "1.5"])
 
@@ -61,7 +63,8 @@ class CliTests(unittest.TestCase):
         service = unittest.mock.Mock()
         service.status.return_value = "stopped"
         with patch(
-            "obsidian_mcp.app.daemon.DaemonService.from_settings", return_value=service
+            "obsidian_vault_mcp.app.daemon.DaemonService.from_settings",
+            return_value=service,
         ) as factory:
             result = runner.invoke(cli, ["status"])
 

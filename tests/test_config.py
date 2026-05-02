@@ -6,19 +6,19 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from obsidian_mcp.core.config import ServerSettings
+from obsidian_vault_mcp.core.config import ServerSettings
 
 
 class ConfigTests(unittest.TestCase):
     def test_settings_load_from_environment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env = {
-                "OBSIDIAN_MCP_VAULT_ROOT": tmp,
-                "OBSIDIAN_MCP_AUTH_TOKEN": "secret",
-                "OBSIDIAN_MCP_OPENAI_API_KEY": "openai-key",
-                "OBSIDIAN_MCP_OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
-                "OBSIDIAN_MCP_EMBEDDING_MODEL": "text-embedding-3-large",
-                "OBSIDIAN_MCP_EMBEDDING_DIMENSIONS": "256",
+                "OBSIDIAN_VAULT_MCP_VAULT_ROOT": tmp,
+                "OBSIDIAN_VAULT_MCP_AUTH_TOKEN": "secret",
+                "OBSIDIAN_VAULT_MCP_OPENAI_API_KEY": "openai-key",
+                "OBSIDIAN_VAULT_MCP_OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
+                "OBSIDIAN_VAULT_MCP_EMBEDDING_MODEL": "text-embedding-3-large",
+                "OBSIDIAN_VAULT_MCP_EMBEDDING_DIMENSIONS": "256",
             }
             with patch.dict(os.environ, env, clear=True):
                 settings = ServerSettings(_env_file=None)  # type: ignore[call-arg]
@@ -33,7 +33,7 @@ class ConfigTests(unittest.TestCase):
     def test_plain_openai_environment_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env = {
-                "OBSIDIAN_MCP_VAULT_ROOT": tmp,
+                "OBSIDIAN_VAULT_MCP_VAULT_ROOT": tmp,
                 "OPENAI_API_KEY": "plain-openai-key",
                 "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
             }
@@ -46,8 +46,8 @@ class ConfigTests(unittest.TestCase):
     def test_embedding_batch_size_must_be_positive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             env = {
-                "OBSIDIAN_MCP_VAULT_ROOT": tmp,
-                "OBSIDIAN_MCP_EMBEDDING_BATCH_SIZE": "0",
+                "OBSIDIAN_VAULT_MCP_VAULT_ROOT": tmp,
+                "OBSIDIAN_VAULT_MCP_EMBEDDING_BATCH_SIZE": "0",
             }
             with patch.dict(os.environ, env, clear=True):
                 with self.assertRaises(ValidationError):

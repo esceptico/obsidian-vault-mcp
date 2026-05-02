@@ -1,6 +1,6 @@
 import unittest
 
-from obsidian_mcp.markdown.frontmatter import (
+from obsidian_vault_mcp.markdown.frontmatter import (
     frontmatter_tags,
     patch_frontmatter,
     split_frontmatter,

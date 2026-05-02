@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from obsidian_mcp.core.config import ServerSettings, load_settings
+from obsidian_vault_mcp.core.config import ServerSettings, load_settings
 
 _START_TIMEOUT = 10.0
 _STOP_TIMEOUT = 10.0
@@ -24,12 +24,12 @@ _HEALTH_PROBE_TIMEOUT = 1.0
 _HEALTH_POLL_INTERVAL = 0.2
 
 _INDEX_FILENAME = "index.sqlite"
-_INDEX_SUBDIR = ".obsidian-mcp"
+_INDEX_SUBDIR = ".obsidian-vault-mcp"
 
-_STATE_DIR_ENV = "OBSIDIAN_MCP_STATE_DIR"
-_DARWIN_SUBPATH = "Library/Application Support/obsidian-mcp"
-_XDG_SUBPATH = "obsidian-mcp"
-_LINUX_FALLBACK = ".local/state/obsidian-mcp"
+_STATE_DIR_ENV = "OBSIDIAN_VAULT_MCP_STATE_DIR"
+_DARWIN_SUBPATH = "Library/Application Support/obsidian-vault-mcp"
+_XDG_SUBPATH = "obsidian-vault-mcp"
+_LINUX_FALLBACK = ".local/state/obsidian-vault-mcp"
 
 
 class DaemonError(RuntimeError):
@@ -83,15 +83,15 @@ class _DaemonStatus:
     def format(self) -> str:
         if self.running and self.healthy is False:
             head = (
-                "◐ obsidian-mcp process running, health check failed "
+                "◐ obsidian-vault-mcp process running, health check failed "
                 f"(pid {self.pid}, port {self.endpoint.port})"
             )
         elif self.running:
-            head = f"● obsidian-mcp running (pid {self.pid}, port {self.endpoint.port})"
+            head = f"● obsidian-vault-mcp running (pid {self.pid}, port {self.endpoint.port})"
         elif self.stale_pid is not None:
-            head = f"○ obsidian-mcp not running (stale pid {self.stale_pid})"
+            head = f"○ obsidian-vault-mcp not running (stale pid {self.stale_pid})"
         else:
-            head = "○ obsidian-mcp not running"
+            head = "○ obsidian-vault-mcp not running"
 
         lines = [
             head,
@@ -193,7 +193,7 @@ class _ServerLauncher:
         command = [
             sys.executable,
             "-m",
-            "obsidian_mcp.app.cli",
+            "obsidian_vault_mcp.app.cli",
             "run",
             "--host",
             endpoint.bind_host,
@@ -285,7 +285,9 @@ class DaemonService:
         self.paths.state_dir.mkdir(parents=True, exist_ok=True)
         existing = self.pid_file.read()
         if existing is not None and self.process_table.is_alive(existing):
-            raise DaemonError(f"obsidian-mcp is already running with pid {existing}")
+            raise DaemonError(
+                f"obsidian-vault-mcp is already running with pid {existing}"
+            )
         self.pid_file.remove()
 
         proc = self.launcher.spawn(self.endpoint, self.paths.log_file)

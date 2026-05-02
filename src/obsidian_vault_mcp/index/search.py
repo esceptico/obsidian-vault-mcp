@@ -7,8 +7,8 @@ from typing import Any
 
 from openai import OpenAI
 
-from obsidian_mcp.core.config import EmbeddingSettings
-from obsidian_mcp.core.constants import (
+from obsidian_vault_mcp.core.config import EmbeddingSettings
+from obsidian_vault_mcp.core.constants import (
     EMBEDDING_TIMEOUT_SECONDS,
     MAX_SEARCH_LIMIT,
     OPENAI_MAX_RETRIES,
@@ -16,10 +16,10 @@ from obsidian_mcp.core.constants import (
     RRF_K,
     SCORE_DECIMALS,
 )
-from obsidian_mcp.core.logging import get_logger
-from obsidian_mcp.core.types import SearchMode
-from obsidian_mcp.index.chunking import TextChunk, chunk_markdown
-from obsidian_mcp.index.store import (
+from obsidian_vault_mcp.core.logging import get_logger
+from obsidian_vault_mcp.core.types import SearchMode
+from obsidian_vault_mcp.index.chunking import TextChunk, chunk_markdown
+from obsidian_vault_mcp.index.store import (
     FtsHit,
     PendingChunk,
     SearchStore,
@@ -27,13 +27,11 @@ from obsidian_mcp.index.store import (
     StoredNote,
     VectorHit,
 )
-from obsidian_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatter
+from obsidian_vault_mcp.markdown.frontmatter import frontmatter_tags, split_frontmatter
 
 
 log = get_logger("search")
-_VECTOR_DISABLED_WARNING = (
-    "Vector search is disabled; set OBSIDIAN_MCP_OPENAI_API_KEY to enable embeddings."
-)
+_VECTOR_DISABLED_WARNING = "Vector search is disabled; set OBSIDIAN_VAULT_MCP_OPENAI_API_KEY to enable embeddings."
 _HYBRID_FTS_ONLY_WARNING = "Hybrid search returned SQLite FTS5 results only."
 _EMBEDDING_NOTE_WARNING = "embedding failed for %s (%s: %s); note remains FTS-indexed"
 _EMBEDDING_BACKFILL_WARNING = (

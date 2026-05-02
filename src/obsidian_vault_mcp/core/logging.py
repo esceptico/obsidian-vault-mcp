@@ -1,6 +1,6 @@
 import logging
 
-ROOT = "obsidian_mcp"
+ROOT = "obsidian_vault_mcp"
 
 
 def _root_logger() -> logging.Logger:

@@ -5,27 +5,36 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from obsidian_mcp.core.config import EmbeddingSettings, VaultSettings
-from obsidian_mcp.core.constants import (
+from obsidian_vault_mcp.core.config import EmbeddingSettings, VaultSettings
+from obsidian_vault_mcp.core.constants import (
     MAX_SEARCH_LIMIT,
     TRASH_TIMESTAMP_FORMAT,
     WATCHER_DEBOUNCE_SECONDS,
 )
-from obsidian_mcp.markdown.obsidian import wikilinks
-from obsidian_mcp.core.logging import get_logger
-from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
-from obsidian_mcp.index.search import IndexedNote, SearchIndex, SearchResult
-from obsidian_mcp.vault.links import link_names_for, plan_wikilink_rewrites
-from obsidian_mcp.vault.listing import entry_for, sort_entries
-from obsidian_mcp.vault.notes import read_note, render_new_note, render_updated_note
-from obsidian_mcp.vault.paths import (
+from obsidian_vault_mcp.markdown.obsidian import wikilinks
+from obsidian_vault_mcp.core.logging import get_logger
+from obsidian_vault_mcp.core.types import (
+    DeleteStrategy,
+    ListSortBy,
+    SearchMode,
+    SortOrder,
+)
+from obsidian_vault_mcp.index.search import IndexedNote, SearchIndex, SearchResult
+from obsidian_vault_mcp.vault.links import link_names_for, plan_wikilink_rewrites
+from obsidian_vault_mcp.vault.listing import entry_for, sort_entries
+from obsidian_vault_mcp.vault.notes import (
+    read_note,
+    render_new_note,
+    render_updated_note,
+)
+from obsidian_vault_mcp.vault.paths import (
     clean_relative_path,
     ensure_markdown_extension,
     temporary_write_path,
 )
-from obsidian_mcp.vault.policy import STORAGE_DIR, is_ignored_relative_path
-from obsidian_mcp.vault.sync import sync_index
-from obsidian_mcp.vault.watcher import VaultWatcher
+from obsidian_vault_mcp.vault.policy import STORAGE_DIR, is_ignored_relative_path
+from obsidian_vault_mcp.vault.sync import sync_index
+from obsidian_vault_mcp.vault.watcher import VaultWatcher
 
 log = get_logger("vault")
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from obsidian_mcp.core.logging import get_logger
+from obsidian_vault_mcp.core.logging import get_logger
 
 log = get_logger("watcher")
 

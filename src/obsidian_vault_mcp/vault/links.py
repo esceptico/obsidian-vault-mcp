@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from pathlib import Path
 
-from obsidian_mcp.markdown.obsidian import rewrite_wikilink_targets
+from obsidian_vault_mcp.markdown.obsidian import rewrite_wikilink_targets
 
 
 def link_names_for(relative_path: str, stem: str, suffix: str) -> set[str]:

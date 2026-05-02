@@ -5,7 +5,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ToolAnnotations
 
-from obsidian_mcp.core.constants import (
+from obsidian_vault_mcp.core.constants import (
     DEFAULT_LIST_LIMIT,
     DEFAULT_READ_LIMIT,
     DEFAULT_SEARCH_LIMIT,
@@ -13,8 +13,13 @@ from obsidian_mcp.core.constants import (
     MAX_READ_LIMIT,
     MAX_SEARCH_LIMIT,
 )
-from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
-from obsidian_mcp.transport.formatters import (
+from obsidian_vault_mcp.core.types import (
+    DeleteStrategy,
+    ListSortBy,
+    SearchMode,
+    SortOrder,
+)
+from obsidian_vault_mcp.transport.formatters import (
     format_backlinks,
     format_create_note,
     format_delete_path,
@@ -26,8 +31,8 @@ from obsidian_mcp.transport.formatters import (
     format_update_note,
     text_result,
 )
-from obsidian_mcp.transport.pagination import page_items, validate_page
-from obsidian_mcp.vault.service import Vault
+from obsidian_vault_mcp.transport.pagination import page_items, validate_page
+from obsidian_vault_mcp.vault.service import Vault
 
 READ_ONLY_TOOL = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False

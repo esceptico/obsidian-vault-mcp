@@ -3,10 +3,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from obsidian_mcp.core.config import EmbeddingSettings, VaultSettings
-from obsidian_mcp.markdown.frontmatter import patch_frontmatter, split_frontmatter
-from obsidian_mcp.core.types import DeleteStrategy, ListSortBy, SearchMode, SortOrder
-from obsidian_mcp.vault.service import Vault
+from obsidian_vault_mcp.core.config import EmbeddingSettings, VaultSettings
+from obsidian_vault_mcp.markdown.frontmatter import patch_frontmatter, split_frontmatter
+from obsidian_vault_mcp.core.types import (
+    DeleteStrategy,
+    ListSortBy,
+    SearchMode,
+    SortOrder,
+)
+from obsidian_vault_mcp.vault.service import Vault
 
 
 class FrontmatterTests(unittest.TestCase):
@@ -83,14 +88,14 @@ class VaultTests(unittest.TestCase):
             results = self._bm25(vault, "semantic search")
             self.assertEqual(results["hits"][0]["path"], "Projects/Alpha.md")
             self.assertTrue(
-                (Path(tmp.name) / ".obsidian-mcp" / "index.sqlite").exists()
+                (Path(tmp.name) / ".obsidian-vault-mcp" / "index.sqlite").exists()
             )
             self.assertNotIn(
-                ".obsidian-mcp", {entry["path"] for entry in self._list(vault)}
+                ".obsidian-vault-mcp", {entry["path"] for entry in self._list(vault)}
             )
 
             with self.assertRaises(ValueError):
-                self._create(vault, ".obsidian-mcp/manual", "nope")
+                self._create(vault, ".obsidian-vault-mcp/manual", "nope")
 
             with self.assertRaises(ValueError):
                 self._create(vault, ".trash/manual", "nope")
@@ -204,13 +209,15 @@ class VaultTests(unittest.TestCase):
             self.assertIn("modified_at", entry)
             self.assertIn("created_at", entry)
 
-    def test_delete_refuses_obsidian_mcp(self) -> None:
+    def test_delete_refuses_obsidian_vault_mcp(self) -> None:
         tmp, vault = self.make_vault()
         with tmp:
             self._create(vault, "Note", "x")
             with self.assertRaises(ValueError):
                 vault.delete_path(
-                    ".obsidian-mcp", recursive=True, strategy=DeleteStrategy.DELETE
+                    ".obsidian-vault-mcp",
+                    recursive=True,
+                    strategy=DeleteStrategy.DELETE,
                 )
 
     def test_trash_does_not_overwrite_same_second(self) -> None:
@@ -231,7 +238,7 @@ class VaultTests(unittest.TestCase):
                 def fromtimestamp(ts, tz=None):
                     return datetime.fromtimestamp(ts, tz)
 
-            with patch("obsidian_mcp.vault.service.datetime", FrozenDateTime):
+            with patch("obsidian_vault_mcp.vault.service.datetime", FrozenDateTime):
                 r1 = self._trash(vault, "A.md")
                 self._create(vault, "A", "second")
                 r2 = self._trash(vault, "A.md")
@@ -247,7 +254,7 @@ class VaultTests(unittest.TestCase):
                 vault.backlinks("does-not-exist.md")
 
     def test_create_note_rejects_oversized_content(self) -> None:
-        from obsidian_mcp.core.constants import MAX_NOTE_BYTES
+        from obsidian_vault_mcp.core.constants import MAX_NOTE_BYTES
 
         tmp, vault = self.make_vault()
         with tmp:
@@ -258,7 +265,7 @@ class VaultTests(unittest.TestCase):
         from unittest.mock import patch
 
         tmp, vault = self.make_vault()
-        with tmp, patch("obsidian_mcp.vault.notes.MAX_NOTE_BYTES", 20):
+        with tmp, patch("obsidian_vault_mcp.vault.notes.MAX_NOTE_BYTES", 20):
             with self.assertRaises(ValueError):
                 self._create(vault, "Big", "body", {"long": "x" * 40})
 
@@ -266,7 +273,7 @@ class VaultTests(unittest.TestCase):
         from unittest.mock import patch
 
         tmp, vault = self.make_vault()
-        with tmp, patch("obsidian_mcp.vault.notes.MAX_NOTE_BYTES", 40):
+        with tmp, patch("obsidian_vault_mcp.vault.notes.MAX_NOTE_BYTES", 40):
             self._create(vault, "Note", "body")
             with self.assertRaises(ValueError):
                 vault.update_note(
@@ -318,12 +325,14 @@ class VaultTests(unittest.TestCase):
                 called["count"] = called.get("count", 0) + 1
                 return real_fsync(fd)
 
-            with patch("obsidian_mcp.vault.service.os.fsync", side_effect=spy_fsync):
+            with patch(
+                "obsidian_vault_mcp.vault.service.os.fsync", side_effect=spy_fsync
+            ):
                 self._create(vault, "Note", "hello")
 
             self.assertGreaterEqual(called.get("count", 0), 1)
 
-            from obsidian_mcp.vault.paths import temporary_write_path
+            from obsidian_vault_mcp.vault.paths import temporary_write_path
 
             a = temporary_write_path(Path(tmp.name) / "X.md")
             b = temporary_write_path(Path(tmp.name) / "X.md")

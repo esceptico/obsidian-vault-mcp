@@ -10,8 +10,12 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from obsidian_mcp.core.config import ServerSettings
-from obsidian_mcp.transport.http import BearerAuthMiddleware, build_asgi_app, create_mcp
+from obsidian_vault_mcp.core.config import ServerSettings
+from obsidian_vault_mcp.transport.http import (
+    BearerAuthMiddleware,
+    build_asgi_app,
+    create_mcp,
+)
 
 
 def _make_inner_app() -> Starlette:
@@ -58,17 +62,17 @@ class AuthPostureTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
 
     def _settings(self, **overrides) -> ServerSettings:
-        env = {"OBSIDIAN_MCP_VAULT_ROOT": self._tmp.name, **overrides}
+        env = {"OBSIDIAN_VAULT_MCP_VAULT_ROOT": self._tmp.name, **overrides}
         with patch.dict(os.environ, env, clear=True):
             return ServerSettings(_env_file=None)  # type: ignore[call-arg]
 
     def test_non_loopback_without_token_refuses(self) -> None:
         with self.assertRaises(RuntimeError) as ctx:
-            create_mcp(self._settings(OBSIDIAN_MCP_HOST="0.0.0.0"))
+            create_mcp(self._settings(OBSIDIAN_VAULT_MCP_HOST="0.0.0.0"))
         self.assertIn("AUTH", str(ctx.exception).upper())
 
     def test_loopback_without_token_starts(self) -> None:
-        create_mcp(self._settings(OBSIDIAN_MCP_HOST="127.0.0.1"))
+        create_mcp(self._settings(OBSIDIAN_VAULT_MCP_HOST="127.0.0.1"))
 
 
 class BuildAsgiAppTests(unittest.TestCase):
@@ -77,7 +81,7 @@ class BuildAsgiAppTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
 
     def _settings(self, **overrides) -> ServerSettings:
-        env = {"OBSIDIAN_MCP_VAULT_ROOT": self._tmp.name, **overrides}
+        env = {"OBSIDIAN_VAULT_MCP_VAULT_ROOT": self._tmp.name, **overrides}
         with patch.dict(os.environ, env, clear=True):
             return ServerSettings(_env_file=None)  # type: ignore[call-arg]
 
@@ -86,7 +90,7 @@ class BuildAsgiAppTests(unittest.TestCase):
         If the bearer guard rejects it, the actual request never runs and the
         browser-based MCP Inspector loops on 401s. CORS middleware must short-
         circuit preflights with 200 + Access-Control-Allow-* headers."""
-        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        settings = self._settings(OBSIDIAN_VAULT_MCP_AUTH_TOKEN="t")
         app = build_asgi_app(settings, create_mcp(settings))
         client = TestClient(app)
         response = client.options(
@@ -103,7 +107,7 @@ class BuildAsgiAppTests(unittest.TestCase):
         )
 
     def test_actual_request_still_requires_auth_after_cors(self) -> None:
-        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        settings = self._settings(OBSIDIAN_VAULT_MCP_AUTH_TOKEN="t")
         app = build_asgi_app(settings, create_mcp(settings))
         client = TestClient(app)
         # POST with Origin (browser-style) but no Authorization → still 401.
@@ -118,7 +122,7 @@ class BuildAsgiAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_health_endpoint_does_not_require_auth(self) -> None:
-        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        settings = self._settings(OBSIDIAN_VAULT_MCP_AUTH_TOKEN="t")
         app = build_asgi_app(settings, create_mcp(settings))
         client = TestClient(app)
         response = client.get("/health")
@@ -130,7 +134,7 @@ class BuildAsgiAppTests(unittest.TestCase):
         on every request after handshake. If the CORS allow_headers list
         doesn't include it, browser preflight rejects the actual request and
         the user sees `TypeError: Failed to fetch`."""
-        settings = self._settings(OBSIDIAN_MCP_AUTH_TOKEN="t")
+        settings = self._settings(OBSIDIAN_VAULT_MCP_AUTH_TOKEN="t")
         app = build_asgi_app(settings, create_mcp(settings))
         client = TestClient(app)
         response = client.options(
@@ -149,7 +153,9 @@ class BuildAsgiAppTests(unittest.TestCase):
 class ToolSchemaTests(unittest.TestCase):
     def _tools(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict(os.environ, {"OBSIDIAN_MCP_VAULT_ROOT": tmp}, clear=True):
+            with patch.dict(
+                os.environ, {"OBSIDIAN_VAULT_MCP_VAULT_ROOT": tmp}, clear=True
+            ):
                 mcp = create_mcp(ServerSettings(_env_file=None))  # type: ignore[call-arg]
 
             async def list_tools():
@@ -237,7 +243,7 @@ class ToolSchemaTests(unittest.TestCase):
 
 class ToolResultTests(unittest.TestCase):
     def _mcp(self, tmp: str):
-        with patch.dict(os.environ, {"OBSIDIAN_MCP_VAULT_ROOT": tmp}, clear=True):
+        with patch.dict(os.environ, {"OBSIDIAN_VAULT_MCP_VAULT_ROOT": tmp}, clear=True):
             return create_mcp(ServerSettings(_env_file=None))  # type: ignore[call-arg]
 
     def test_search_returns_markdown_content_and_structured_content(self) -> None:
