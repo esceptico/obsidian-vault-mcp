@@ -184,7 +184,7 @@ class _HealthClient:
                 timeout=timeout,
             ) as response:
                 return response.status == 200
-        except (OSError, urllib.error.URLError):
+        except OSError, urllib.error.URLError:
             return False
 
 

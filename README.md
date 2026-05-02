@@ -63,6 +63,7 @@ The Markdown `content` is the compatibility path and should contain everything a
 ## Development
 
 ```bash
+uv sync --extra dev
 uv run ruff format --check .
 uv run ruff check .
 uv run python -m unittest -v

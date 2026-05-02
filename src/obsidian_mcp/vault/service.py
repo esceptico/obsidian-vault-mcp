@@ -385,7 +385,7 @@ class Vault:
         """Like relative() but does not require the path to exist on disk."""
         try:
             return path.resolve().relative_to(self.root).as_posix()
-        except (FileNotFoundError, ValueError):
+        except FileNotFoundError, ValueError:
             return path.relative_to(self.root).as_posix()
 
     def _unique_trash_destination(self, trash_dir: Path, target_name: str) -> Path:
