@@ -60,6 +60,10 @@ uv run obsidian-mcp stop
 Tool results return Markdown text for agents and `structuredContent` for
 programmatic clients.
 
+The Markdown `content` is the compatibility path and should contain everything
+an agent needs. `structuredContent` is useful for clients that expose it, but
+some MCP clients still treat it as secondary metadata.
+
 ## Development
 
 ```bash
