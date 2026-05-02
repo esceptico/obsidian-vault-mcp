@@ -51,7 +51,7 @@ class DaemonTests(unittest.TestCase):
             with (
                 patch("obsidian_mcp.app.daemon.daemon_paths", return_value=paths),
                 patch("obsidian_mcp.app.daemon.subprocess.Popen", return_value=process),
-                patch("obsidian_mcp.app.daemon.wait_for_health", return_value=True),
+                patch("obsidian_mcp.app.daemon.HealthClient.wait", return_value=True),
             ):
                 pid = start_daemon("127.0.0.1", 8000)
 
@@ -62,12 +62,16 @@ class DaemonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = DaemonPaths(Path(tmp), Path(tmp) / "server.pid", Path(tmp) / "server.log")
             process = Mock(pid=456)
-            settings = SimpleNamespace(host="127.0.0.1", port=8008)
+            settings = SimpleNamespace(
+                host="127.0.0.1",
+                port=8008,
+                vault=SimpleNamespace(root=Path(tmp)),
+            )
             with (
                 patch("obsidian_mcp.app.daemon.daemon_paths", return_value=paths),
                 patch("obsidian_mcp.app.daemon.load_settings", return_value=settings),
                 patch("obsidian_mcp.app.daemon.subprocess.Popen", return_value=process),
-                patch("obsidian_mcp.app.daemon.wait_for_health", return_value=True) as wait,
+                patch("obsidian_mcp.app.daemon.HealthClient.wait", return_value=True) as wait,
             ):
                 start_daemon(None, None)
 
@@ -85,13 +89,32 @@ class DaemonTests(unittest.TestCase):
                 self.assertIn("stale", stop_daemon())
             self.assertFalse(paths.pid_file.exists())
 
-    def test_status_removes_stale_pid(self) -> None:
+    def test_status_reports_stale_pid_without_mutating_pidfile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             paths = DaemonPaths(Path(tmp), Path(tmp) / "server.pid", Path(tmp) / "server.log")
             write_pid(paths.pid_file, 99999999)
             with patch("obsidian_mcp.app.daemon.daemon_paths", return_value=paths):
                 self.assertIn("stale", daemon_status(None, None))
-            self.assertFalse(paths.pid_file.exists())
+            self.assertTrue(paths.pid_file.exists())
+
+    def test_status_probes_effective_health_endpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = DaemonPaths(Path(tmp), Path(tmp) / "server.pid", Path(tmp) / "server.log")
+            write_pid(paths.pid_file, os.getpid())
+            settings = SimpleNamespace(
+                host="0.0.0.0",
+                port=8008,
+                vault=SimpleNamespace(root=Path(tmp)),
+            )
+            with (
+                patch("obsidian_mcp.app.daemon.daemon_paths", return_value=paths),
+                patch("obsidian_mcp.app.daemon.load_settings", return_value=settings),
+                patch("obsidian_mcp.app.daemon.HealthClient.probe", return_value=True) as probe,
+            ):
+                output = daemon_status(None, 9000)
+
+            self.assertIn("port 9000", output)
+            probe.assert_called_once_with("127.0.0.1", 9000, timeout=1.0)
 
 
 if __name__ == "__main__":
